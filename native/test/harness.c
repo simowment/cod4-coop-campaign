@@ -40,7 +40,7 @@ void harness_main(void)
 		net_frame_main();
 		if (g_loadPending && now_ms() - start > 300.0) {
 			g_loadPending = 0; inLevel = 1;
-			net_set_map(g_map);
+			net_set_map(g_map, "");
 			logf("LEVEL loaded %s, barrier=%d", g_map, net_barrier());
 		}
 		if (inLevel && !net_barrier()) {

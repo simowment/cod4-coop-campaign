@@ -31,7 +31,11 @@ static void bi_openfile(void)
 	iarg = scr_int(2);
 
 	if (!cmd[0]) { scr_add_int(net_local_slot()); return; }
-	if (!strcmp(cmd, "level")) { net_set_map(arg); scr_add_int(net_local_slot()); return; }
+	if (!strcmp(cmd, "level")) {
+		char start[64];
+		strlcpy_(start, scr_type(3) == VT_STRING ? scr_str(3) : "", sizeof start);
+		net_set_map(arg, start); scr_add_int(net_local_slot()); return;
+	}
 	if (!strcmp(cmd, "host")) { scr_add_int(net_active() ? net_is_host() : 1); return; }
 	if (!strcmp(cmd, "active")) { scr_add_int(net_active()); return; }
 	if (!strcmp(cmd, "count")) { scr_add_int(net_num_players()); return; }

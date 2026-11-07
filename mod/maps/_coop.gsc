@@ -30,6 +30,7 @@ preinit()
 	c.health = [];
 	c.ai = [];
 	c.pending_flags = [];
+	c.pending_flag_time = [];
 	c.local_flags = [];
 	c.shared_flags = [];
 	c.cleared_at = [];
@@ -64,7 +65,9 @@ preinit()
 
 	register_handlers();
 	maps\_coop_levels::init_local_flags();
-	log( "preinit slot " + c.slot + " host " + c.ishost + " level " + getdvar( "mapname" ) );
+	log( "preinit slot " + c.slot + " host " + c.ishost + " level " + getdvar( "mapname" ) + " start '" + getdvar( "start" ) + "' jumpto '" + getdvar( "jumpto" ) + "'" );
+	if ( isdefined( level.jumpto ) )
+		log( "level.jumpto '" + level.jumpto + "' section '" + level.jumptosection + "'" );
 }
 
 postinit()
@@ -77,7 +80,7 @@ postinit()
 	build_trigger_ids();
 	build_ai_ids();
 
-	openfile( "coop", "level", level.script ); // tells the proxy which level we are in; may start the load barrier
+	openfile( "coop", "level", level.script, getdvar( "start" ) ); // level + start point; may start the load barrier
 	if ( openfile( "coop", "barrier" ) )
 		thread barrier_hud();
 
@@ -168,7 +171,7 @@ net_loop()
 		if ( c.hb % 100 == 0 && getdvar( "coop_heartbeat" ) == "1" )
 			for ( ps = 0; ps < c.max; ps++ )
 				if ( isdefined( c.puppets[ ps ] ) )
-					log( "  puppet " + ps + " weapon '" + c.puppets[ ps ].coop_weapon + "' remote '" + c.remote_weapon[ ps ] + "' at " + c.puppets[ ps ].origin + " net " + ( fgetarg( ps, 0 ), fgetarg( ps, 1 ), fgetarg( ps, 2 ) ) + " hidden " + c.puppets[ ps ].coop_hidden + " anim " + c.puppets[ ps ].coop_anim + " flags " + fgetarg( ps, 5 ) );
+					log( "  puppet " + ps + " attach " + c.puppets[ ps ] getattachsize() + " weapon '" + c.puppets[ ps ].coop_weapon + "' model '" + puppet_weapon_model( c.puppets[ ps ] ) + "' remote '" + c.remote_weapon[ ps ] + "' at " + c.puppets[ ps ].origin + " net " + ( fgetarg( ps, 0 ), fgetarg( ps, 1 ), fgetarg( ps, 2 ) ) + " hidden " + c.puppets[ ps ].coop_hidden + " anim " + c.puppets[ ps ].coop_anim + " flags " + fgetarg( ps, 5 ) );
 		wait 0.05;
 	}
 }
@@ -216,6 +219,20 @@ test_command()
 		level.player dodamage( level.player.health - 1, level.player.origin );
 	else if ( v == "save" )
 		thread maps\_autosave::tryAutoSave( "coop_test" );
+	else if ( getsubstr( v, 0, 5 ) == "flag " )
+	{
+		f = getsubstr( v, 5, v.size );
+		if ( isdefined( level.flag[ f ] ) )
+			flag_set( f );
+		else
+			log( "test flag: no such flag " + f );
+	}
+	else if ( v == "revive" )
+	{
+		for ( s = 0; s < level.coop.max; s++ )
+			if ( s != level.coop.slot && level.coop.downed[ s ] )
+				send( "V|" + s );
+	}
 	else if ( v == "forcesave" )
 	{
 		id = saveGameNoCommit( "coop_test", maps\_autosave::getDescription() );
@@ -240,6 +257,13 @@ test_command()
 				ids++;
 		log( "status axis=" + ai.size + " with_id=" + ids + " health=" + level.player.health + " down=" + level.coop.down );
 	}
+}
+
+puppet_weapon_model( p )
+{
+	if ( !isdefined( p.coop_weapon ) || p.coop_weapon == "" )
+		return "";
+	return getweaponmodel( p.coop_weapon );
 }
 
 drain_stale_events()
@@ -486,7 +510,12 @@ ev_flag( slot, tok )
 	c = level.coop;
 	if ( c.ishost && tok[ 3 ] == "1" && isdefined( c.cleared_at[ tok[ 2 ] ] ) && gettime() - c.cleared_at[ tok[ 2 ] ] < 10000 )
 		return; // stale set from a client that has not caught up with our clear yet
-	apply_flag( tok[ 2 ], tok[ 3 ] == "1" );
+	// Do not apply at once: many flags mean "my local setup is done" and applying them before the
+	// receiving world got there runs its scenes on missing data (cargoship heroes_ready -> runtime error).
+	// Hold remote flags; apply only if the local world has not set it by itself in the meantime, and
+	// never during the opening seconds of a level, while every world is still initializing.
+	c.pending_flags[ tok[ 2 ] ] = tok[ 3 ] == "1";
+	c.pending_flag_time[ tok[ 2 ] ] = gettime() + 4000;
 }
 
 apply_flag( msg, value )
@@ -495,6 +524,7 @@ apply_flag( msg, value )
 	if ( !isdefined( level.flag ) || !isdefined( level.flag[ msg ] ) )
 	{
 		c.pending_flags[ msg ] = value; // not flag_init'ed here yet
+		c.pending_flag_time[ msg ] = gettime() + 1000;
 		return;
 	}
 	if ( level.flag[ msg ] == value )
@@ -514,16 +544,20 @@ apply_pending_flags()
 	c = level.coop;
 	if ( !c.pending_flags.size )
 		return;
+	if ( gettime() < 15000 )
+		return; // level still initializing everywhere
 	keys = getarraykeys( c.pending_flags );
 	for ( i = 0; i < keys.size; i++ )
 	{
 		k = keys[ i ];
-		if ( isdefined( level.flag[ k ] ) )
-		{
-			v = c.pending_flags[ k ];
-			c.pending_flags[ k ] = undefined;
-			apply_flag( k, v );
-		}
+		if ( isdefined( c.pending_flag_time[ k ] ) && gettime() < c.pending_flag_time[ k ] )
+			continue;
+		if ( !isdefined( level.flag[ k ] ) )
+			continue; // not flag_init'ed here yet
+		v = c.pending_flags[ k ];
+		c.pending_flags[ k ] = undefined;
+		c.pending_flag_time[ k ] = undefined;
+		apply_flag( k, v );
 	}
 }
 
@@ -694,9 +728,16 @@ register_ai( id )
 watch_ai_death()
 {
 	id = self.coop_id;
+	team = self.team;
 	self waittill( "death", attacker );
 	level.coop.ai[ id ] = undefined;
-	if ( isdefined( self ) && isdefined( self.coop_remote_kill ) )
+	// a script delete() also fires "death" (and leaves self undefined): that is not a kill
+	if ( !isdefined( self ) )
+		return;
+	if ( isdefined( self.coop_remote_kill ) )
+		return;
+	// only enemies: friendlies and story characters live and die by each world's own script
+	if ( !isdefined( team ) || team != "axis" )
 		return;
 	if ( !level.coop.active )
 		return;
