@@ -70,3 +70,7 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
 2. `delete()` fires "death": the host's kill sync killed story AI on the client. Only real deaths of axis AI are synced now.
 3. get_up() notified the event its caller (bleed_out) ended on, which killed the get-up halfway.
 4. `anim` is a reserved global; prone_crawl root motion dragged the puppet away; VIP models were used as the squadmate.
+
+## Test environment
+- The virtual monitor was removed again with `tools/vdd_uninstall.ps1` (2026-11-07). `tools/bg.ps1` places
+  test instances at x=1920, so reinstall it first with `tools/vdd_install.ps1 <driver folder>`.
