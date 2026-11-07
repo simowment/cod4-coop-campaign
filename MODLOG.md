@@ -39,3 +39,23 @@ T1 loose GSC override wins; T2 bridge builtins callable with dev flag cleared in
 2. Python heredocs through Bash turn `\n` inside string literals into real newlines. Use the Edit tool for C string escapes.
 3. mingw64 here is x86_64-only. A 32-bit DLL needs `-m32 -ffreestanding` + `dlltool -m i386 --as-flags=--32 -k` import libs + `ld -m i386pe`; no CRT, so rt.c provides memcpy etc.
 4. Windows Sleep(5) is about 15 ms, which inflates harness ping. The game ticks at frame rate.
+
+## In-game verification (2026-11-07, two instances on one PC via a virtual monitor)
+Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allowdupe, coop_background, coop_tag, per-instance mods/coop + mods/coopb), screenshots taken by the proxy inside Present.
+- Join, host map follow, start barrier, both levels running (heartbeat level time advancing on both).
+- Puppets: correct position and facing, name tag, full-body drone anims re-anchored on the network pose.
+- Flags 16/16, trigger hit replicated (T|387), AI ids deterministic (17/17 axis had ids on both), host kills 17 sent / 17 received.
+- Downed on lethal damage -> D|1 -> host HUD/puppet show downed; bleed-out respawn next to buddy.
+- Checkpoint: host save -> S -> client commits (140 ms).
+- Mission fail: X -> client fails -> both reload, stale events drained.
+- Mission end: E -> both load the next mission (hunted) together, barrier released.
+
+## Engine facts learned in game
+- The game presents from its render backend thread; game-state work must run on the main loop (hook: call at 0x5956e4 -> Com_Frame 0x5356a0).
+- WinMain refuses a second instance unless the command line starts with "allowdupe".
+- An unfocused window gets cl_paused=1 every frame (5 sites, patched only in test mode).
+- `+map X` on the command line can stall before the first server frame when unfocused; `coop_startmap` loads it from the menu instead.
+- Compiling all 21 level modules overflowed the script variable pool on bog_a; each level now references only its own module.
+- Fake-AI script models only animate via animscripted with full-body anims, drawn at the anchor (re-anchor per pose).
+- `loc_warnings` and `fs_game` are internal or write-protected for scripts; set loc_warnings on the command line or through Cbuf.
+- getentnum/getentbynum are dev builtins with full retail implementations; the method table is in .rdata (VirtualProtect).
