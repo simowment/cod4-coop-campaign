@@ -34,3 +34,4 @@ int net_pop_event(char *out, int cap); /* "<origin>|<payload>"; system events us
 
 void net_set_map(const char *map);     /* the local level that just loaded */
 const char *net_host_map(void);
+int net_barrier(void);             /* 1 while waiting for everyone to load the level */

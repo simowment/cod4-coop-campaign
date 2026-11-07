@@ -29,7 +29,8 @@ static s32 WINAPI hk_Present(void *self, const void *src, const void *dst, void 
 {
 	if (g_enabled) {
 		net_frame_main();
-		if (g_forceUnpause && net_active() && net_num_players() > 1) dvar_set_int("cl_paused", 0);
+		if (net_barrier()) dvar_set_int("cl_paused", 1);
+		else if (g_forceUnpause && net_active() && net_num_players() > 1) dvar_set_int("cl_paused", 0);
 	}
 	return real_Present(self, src, dst, hwnd, dirty);
 }

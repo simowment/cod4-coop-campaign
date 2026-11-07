@@ -60,6 +60,7 @@ typedef struct {
 	double offset; int haveOffset;
 	double lastPose;
 	int ping;
+	char readyMap[64];
 } Slot;
 
 static struct {
@@ -79,6 +80,7 @@ static struct {
 	/* inbound queue to GSC */
 	char inq[256][NET_EVT_MAX + 8]; int inHead, inCount;
 	double hostOffset; int haveHostOffset;
+	int barrier; double barrierStart; double pendingSince;
 } N;
 
 static int seq_gt(u16 a, u16 b) { return (s16)(a - b) > 0; }
@@ -218,7 +220,7 @@ static void handle_control(int origin, const char *txt)
 	if (!strcmp(a, "MAP") && b) {
 		strlcpy_(N.hostMap, b, sizeof N.hostMap);
 		logf("net: host map is '%s'", N.hostMap);
-		if (!N.host && stricmp_(N.hostMap, N.localMap) != 0) strlcpy_(N.pendingMap, N.hostMap, sizeof N.pendingMap);
+		if (!N.host && stricmp_(N.hostMap, N.localMap) != 0) { strlcpy_(N.pendingMap, N.hostMap, sizeof N.pendingMap); N.pendingSince = now_ms(); }
 		char e[96]; fmt(e, sizeof e, "M|%s", N.hostMap); sys_event(e);
 	} else if ((!strcmp(a, "JOIN") || !strcmp(a, "NAME")) && b && c) {
 		int s = atoi_(b);
@@ -228,6 +230,8 @@ static void handle_control(int origin, const char *txt)
 			strlcpy_(N.slots[s].name, c, sizeof N.slots[s].name);
 			if (!was) { char e[96]; fmt(e, sizeof e, "J|%d|%s", s, c); sys_event(e); }
 		}
+	} else if (!strcmp(a, "GO") && b) {
+		if (N.barrier && !stricmp_(b, N.localMap)) { N.barrier = 0; logf("net: barrier released by host"); sys_event("G"); }
 	} else if (!strcmp(a, "PART") && b) {
 		int s = atoi_(b);
 		if (s >= 0 && s < NET_MAX_PLAYERS && N.slots[s].connected) {
@@ -237,12 +241,38 @@ static void handle_control(int origin, const char *txt)
 	}
 }
 
+static void host_check_barrier(void)
+{
+	if (!N.host || !N.barrier) return;
+	for (int s = 1; s < NET_MAX_PLAYERS; s++)
+		if (N.links[s].used && stricmp_(N.slots[s].readyMap, N.localMap) != 0) return;
+	char t[96]; fmt(t, sizeof t, "~GO|%s", N.localMap);
+	broadcast_from(0, t, -1);
+	N.barrier = 0;
+	logf("net: everyone loaded '%s', releasing barrier", N.localMap);
+	sys_event("G");
+}
+
+static void host_control(int s, const char *txt)
+{
+	/* ~RDY|map from a client that finished loading */
+	if (!strncmp(txt, "~RDY|", 5)) {
+		strlcpy_(N.slots[s].readyMap, txt + 5, sizeof N.slots[s].readyMap);
+		logf("net: slot %d ready in '%s'", s, N.slots[s].readyMap);
+		if (stricmp_(N.slots[s].readyMap, N.localMap) != 0) return;
+		if (N.barrier) { host_check_barrier(); return; }
+		/* late joiner: let them in right away, and tell host GSC to send a catch-up */
+		char t[96]; fmt(t, sizeof t, "~GO|%s", N.localMap); link_queue(&N.links[s], 0, t);
+		char e[32]; fmt(e, sizeof e, "L|%d", s); sys_event(e);
+	}
+}
+
 static void deliver(Link *l, int linkSlot, int origin, const char *txt)
 {
 	(void)l;
 	if (txt[0] == '~') {
-		/* control: only the host may originate */
-		if (!N.host && origin == 0) handle_control(origin, txt);
+		if (N.host) host_control(linkSlot, txt);
+		else if (origin == 0) handle_control(origin, txt); /* only the host may originate */
 		return;
 	}
 	char o[8]; fmt(o, sizeof o, "%d", origin);
@@ -258,6 +288,8 @@ static void host_drop(int s, const char *why)
 	char t[32]; fmt(t, sizeof t, "~PART|%d", s);
 	broadcast_from(0, t, -1);
 	char e[32]; fmt(e, sizeof e, "P|%d", s); sys_event(e);
+	N.slots[s].readyMap[0] = 0;
+	host_check_barrier();
 }
 
 static int addr_eq(const sockaddr_in *a, const sockaddr_in *b) { return a->addr == b->addr && a->port == b->port; }
@@ -476,6 +508,7 @@ void net_tick(void)
 	} else if (now - N.links[0].lastRecv > TIMEOUT_MS) {
 		logf("net: host timed out"); sys_event("H"); N.joined = 0; N.configured = 0; return;
 	}
+	if (N.barrier && now - N.barrierStart > 90000.0) { N.barrier = 0; logf("net: barrier timeout"); sys_event("G"); }
 	int pending = 0;
 	for (int s = 0; s < NET_MAX_PLAYERS; s++) if (N.links[s].used && N.links[s].ackedOut != (u16)(N.links[s].nextOut - 1)) pending = 1;
 	if (now - N.lastSend < (pending ? 16.0 : SEND_INTERVAL)) return;
@@ -494,7 +527,8 @@ void net_frame_main(void)
 	if (!N.configured || N.host) return;
 	if (N.pendingMap[0] && stricmp_(N.pendingMap, N.localMap) != 0) {
 		double now = now_ms();
-		if (now - N.lastMapCmd > 20000.0) {
+		/* at the menu follow at once; in a level give the game's own transition 8 s to get there first */
+		if ((!N.localMap[0] || now - N.pendingSince > 8000.0) && now - N.lastMapCmd > 20000.0) {
 			char cmd[96]; fmt(cmd, sizeof cmd, "map %s\n", N.pendingMap);
 			logf("net: following host -> %s", cmd);
 			cbuf_add_text(cmd);
@@ -591,10 +625,17 @@ void net_set_map(const char *map)
 	strlcpy_(N.localMap, map, sizeof N.localMap);
 	if (N.pendingMap[0] && !stricmp_(N.pendingMap, map)) N.pendingMap[0] = 0;
 	logf("net: local level '%s'", map);
-	if (N.host && net_active()) {
+	if (!net_active()) return;
+	if (net_num_players() > 1) { N.barrier = 1; N.barrierStart = now_ms(); }
+	if (N.host) {
 		char t[96]; fmt(t, sizeof t, "~MAP|%s", map);
 		broadcast_from(0, t, -1);
 		strlcpy_(N.hostMap, map, sizeof N.hostMap);
+		host_check_barrier();
+	} else {
+		char t[96]; fmt(t, sizeof t, "~RDY|%s", map);
+		link_queue(&N.links[0], N.localSlot, t);
 	}
 }
+int net_barrier(void) { return N.barrier; }
 const char *net_host_map(void) { return N.host ? N.localMap : N.hostMap; }

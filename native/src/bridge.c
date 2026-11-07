@@ -48,6 +48,7 @@ static void bi_openfile(void)
 		cbuf_add_text(c); scr_add_int(1); return;
 	}
 	if (!strcmp(cmd, "unpause")) { g_forceUnpause = iarg; scr_add_int(1); return; }
+	if (!strcmp(cmd, "barrier")) { scr_add_int(net_barrier()); return; }
 	if (!strcmp(cmd, "version")) { scr_add_string(COOP_NATIVE_VERSION); return; }
 	scr_add_int(-2);
 }
