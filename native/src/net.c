@@ -81,6 +81,7 @@ static struct {
 	char inq[256][NET_EVT_MAX + 8]; int inHead, inCount;
 	double hostOffset; int haveHostOffset;
 	int barrier; double barrierStart; double pendingSince;
+	int minPlayers; int levelsLoaded;
 } N;
 
 static int seq_gt(u16 a, u16 b) { return (s16)(a - b) > 0; }
@@ -112,8 +113,16 @@ static int link_queue(Link *l, int origin, const char *txt)
 	return 1;
 }
 
+#ifdef NET_HARNESS
+int harness_loss_pct;
+static u32 lcg = 12345;
+#endif
 static int sendto_addr(const sockaddr_in *a, const void *buf, int len)
 {
+#ifdef NET_HARNESS
+	lcg = lcg * 1103515245u + 12345u;
+	if ((int)((lcg >> 16) % 100) < harness_loss_pct) return len;
+#endif
 	return psendto(N.sock, buf, len, 0, a, sizeof *a);
 }
 
@@ -244,8 +253,14 @@ static void handle_control(int origin, const char *txt)
 static void host_check_barrier(void)
 {
 	if (!N.host || !N.barrier) return;
-	for (int s = 1; s < NET_MAX_PLAYERS; s++)
-		if (N.links[s].used && stricmp_(N.slots[s].readyMap, N.localMap) != 0) return;
+	int ready = 1;
+	for (int s = 1; s < NET_MAX_PLAYERS; s++) {
+		if (!N.links[s].used) continue;
+		if (stricmp_(N.slots[s].readyMap, N.localMap) != 0) return;
+		ready++;
+	}
+	/* lobby: the first mission waits until coop_wait players are in */
+	if (N.levelsLoaded <= 1 && ready < N.minPlayers) return;
 	char t[96]; fmt(t, sizeof t, "~GO|%s", N.localMap);
 	broadcast_from(0, t, -1);
 	N.barrier = 0;
@@ -437,6 +452,7 @@ void net_init(void)
 	if (cmdline_get("coop_name", v, sizeof v)) strlcpy_(N.localName, v, sizeof N.localName);
 	for (char *p = N.localName; *p; p++) if (*p == '|' || *p == '~') *p = '_';
 	if (cmdline_get("coop_port", v, sizeof v)) N.port = (u16)atoi_(v);
+	if (cmdline_get("coop_wait", v, sizeof v)) { N.minPlayers = atoi_(v); if (N.minPlayers > NET_MAX_PLAYERS) N.minPlayers = NET_MAX_PLAYERS; }
 	if (cmdline_get("coop_maxplayers", v, sizeof v)) { int m = atoi_(v); if (m >= 2 && m <= NET_MAX_PLAYERS) N.maxPlayers = m; }
 	const char *host = cmdline_get("coop_host", v, sizeof v);
 	int wantHost = host && v[0] && v[0] != '0';
@@ -508,7 +524,7 @@ void net_tick(void)
 	} else if (now - N.links[0].lastRecv > TIMEOUT_MS) {
 		logf("net: host timed out"); sys_event("H"); N.joined = 0; N.configured = 0; return;
 	}
-	if (N.barrier && now - N.barrierStart > 90000.0) { N.barrier = 0; logf("net: barrier timeout"); sys_event("G"); }
+	if (N.barrier && now - N.barrierStart > (N.levelsLoaded <= 1 && N.minPlayers > 1 ? 300000.0 : 90000.0)) { N.barrier = 0; logf("net: barrier timeout"); sys_event("G"); }
 	int pending = 0;
 	for (int s = 0; s < NET_MAX_PLAYERS; s++) if (N.links[s].used && N.links[s].ackedOut != (u16)(N.links[s].nextOut - 1)) pending = 1;
 	if (now - N.lastSend < (pending ? 16.0 : SEND_INTERVAL)) return;
@@ -626,7 +642,8 @@ void net_set_map(const char *map)
 	if (N.pendingMap[0] && !stricmp_(N.pendingMap, map)) N.pendingMap[0] = 0;
 	logf("net: local level '%s'", map);
 	if (!net_active()) return;
-	if (net_num_players() > 1) { N.barrier = 1; N.barrierStart = now_ms(); }
+	N.levelsLoaded++;
+	if (net_num_players() > 1 || (N.host && N.levelsLoaded == 1 && N.minPlayers > 1)) { N.barrier = 1; N.barrierStart = now_ms(); }
 	if (N.host) {
 		char t[96]; fmt(t, sizeof t, "~MAP|%s", map);
 		broadcast_from(0, t, -1);

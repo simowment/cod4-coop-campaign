@@ -44,7 +44,7 @@ watch_health()
 		if ( !isalive( level.player ) )
 			return;
 		// the engine leaves the player at 1-2 hp with a short invulnerability window on a lethal hit
-		if ( level.player.health <= max( 2, level.player.maxhealth * 0.12 ) )
+		if ( level.player.health <= max( 2, level.player.maxhealth * 0.05 ) )
 			go_down();
 	}
 }

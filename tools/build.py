@@ -77,6 +77,10 @@ def main():
     if os.path.isfile(dll):
         shutil.copyfile(dll, os.path.join(a.game, 'd3d9.dll'))
         print('installed d3d9.dll proxy')
+    for fn in os.listdir(os.path.join(ROOT, 'launcher')):
+        if fn.endswith('.bat'):
+            shutil.copyfile(os.path.join(ROOT, 'launcher', fn), os.path.join(a.game, fn))
+    print('installed launchers')
     print('done ->', out)
 
 

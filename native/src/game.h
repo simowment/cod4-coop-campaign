@@ -77,11 +77,16 @@ static inline void scr_add_string(const char *s)
 	u32 fn = FN_Scr_AddString;
 	__asm__ volatile("call *%%eax" : "+a"(fn), "+S"(s) : : "ecx", "edx", "memory", "cc");
 }
+#ifdef NET_HARNESS
+void harness_cbuf(const char *s);
+static inline void cbuf_add_text(const char *s) { harness_cbuf(s); }
+#else
 static inline void cbuf_add_text(const char *s)
 {
 	u32 fn = FN_Cbuf_AddText, lc = 0;
 	__asm__ volatile("call *%%edx" : "+a"(s), "+c"(lc), "+d"(fn) : : "memory", "cc");
 }
+#endif
 static inline void dvar_set_int(const char *name, int value)
 {
 	u32 fn = FN_Dvar_SetIntByName, junk;
