@@ -4,6 +4,7 @@
 #include "game.h"
 #include "net.h"
 #include "bridge.h"
+#include "devmode.h"
 
 typedef void *(WINAPI *Direct3DCreate9_t)(u32);
 typedef s32 (WINAPI *CreateDevice_t)(void *self, u32 adapter, u32 type, void *hwnd, u32 flags, void *pp, void **out);
@@ -15,6 +16,7 @@ static Present_t real_Present;
 typedef s32 (WINAPI *SCPresent_t)(void *self, const void *src, const void *dst, void *hwnd, const void *dirty, u32 flags);
 static SCPresent_t real_SCPresent;
 static int g_enabled, g_started;
+static void *g_device;
 
 static int patch_vtable(void **vt, int idx, void *fn, void **orig)
 {
@@ -27,24 +29,47 @@ static int patch_vtable(void **vt, int idx, void *fn, void **orig)
 	return 1;
 }
 
-static void frame_tick(void)
+/* Game main thread, once per frame (after Com_Frame). Everything that touches game state - network,
+   Cbuf, dvars - runs here. NOT in Present: iw3sp presents from its render backend thread, and the main
+   thread may be spin-waiting on that thread (a SendMessage-style call from there deadlocks). */
+static void main_tick(void)
 {
 	if (!g_enabled) return;
 	net_frame_main();
+	devmode_main();
 	if (net_barrier()) dvar_set_int("cl_paused", 1);
-	else if (g_forceUnpause && net_active() && net_num_players() > 1) dvar_set_int("cl_paused", 0);
+	else if (g_devmode || (g_forceUnpause && net_active() && net_num_players() > 1)) dvar_set_int("cl_paused", 0);
+}
+
+#define MAINLOOP_CALL 0x5956e4  /* E8 rel32 -> 0x5356a0 (per-frame body) inside the main loop */
+#define COM_FRAME     0x5356a0
+static void hk_ComFrame(void)
+{
+	((void (*)(void))COM_FRAME)();
+	main_tick();
+}
+
+static int install_mainloop_hook(void)
+{
+	u8 *p = (u8 *)MAINLOOP_CALL;
+	if (p[0] != 0xE8 || (u32)(MAINLOOP_CALL + 5 + *(s32 *)(p + 1)) != COM_FRAME) return 0;
+	u32 old;
+	if (!VirtualProtect(p, 5, 0x40, &old)) return 0;
+	*(s32 *)(p + 1) = (s32)((u32)hk_ComFrame - (MAINLOOP_CALL + 5));
+	VirtualProtect(p, 5, old, &old);
+	return 1;
 }
 
 static s32 WINAPI hk_Present(void *self, const void *src, const void *dst, void *hwnd, const void *dirty)
 {
-	frame_tick();
+	devmode_render(self);
 	return real_Present(self, src, dst, hwnd, dirty);
 }
 
-/* iw3sp presents through the implicit swap chain, not IDirect3DDevice9::Present */
+/* iw3sp presents through the implicit swap chain, on its render backend thread */
 static s32 WINAPI hk_SCPresent(void *self, const void *src, const void *dst, void *hwnd, const void *dirty, u32 flags)
 {
-	frame_tick();
+	devmode_render(g_device);
 	return real_SCPresent(self, src, dst, hwnd, dirty, flags);
 }
 
@@ -53,6 +78,8 @@ static s32 WINAPI hk_CreateDevice(void *self, u32 adapter, u32 type, void *hwnd,
 	s32 hr = real_CreateDevice(self, adapter, type, hwnd, flags, pp, out);
 	if (hr >= 0 && out && *out) {
 		void **vt = *(void ***)*out;
+		g_device = *out;
+		devmode_on_device(*out, hwnd);
 		if (patch_vtable(vt, 17, (void *)hk_Present, (void **)&real_Present)) logf("proxy: device Present hooked");
 		/* IDirect3DDevice9::GetSwapChain is vtable 14; IDirect3DSwapChain9::Present is 3, Release is 2 */
 		typedef s32 (WINAPI *GetSwapChain_t)(void *, u32, void **);
@@ -73,12 +100,16 @@ static void start_once(void)
 	g_started = 1;
 	u32 n = GetModuleFileNameA(NULL, path, sizeof path - 32);
 	while (n && path[n - 1] != '\\' && path[n - 1] != '/') n--;
-	memcpy(path + n, "coop_native.log", 16);
+	devmode_init();
+	if (g_devmode) fmt(path + n, (int)(sizeof path - n), "coop_native_%s.log", devmode_tag());
+	else memcpy(path + n, "coop_native.log", 16);
 	log_open(path);
 	logf("cod4 coop native %s", COOP_NATIVE_VERSION);
 	if (!bridge_verify_exe()) { logf("proxy: unsupported iw3sp.exe build, coop disabled (pure d3d9 passthrough)"); return; }
 	if (!bridge_install()) { logf("proxy: bridge install failed, coop disabled"); return; }
 	logf("proxy: GSC bridge installed");
+	if (!install_mainloop_hook()) { logf("proxy: main loop hook failed, coop disabled"); return; }
+	logf("proxy: main loop hooked");
 	net_init();
 	g_enabled = 1;
 }

@@ -149,7 +149,11 @@ static int enable_dev_builtin(u32 va, const char *name)
 {
 	BuiltinEntry *e = (BuiltinEntry *)va;
 	if (!e->name || strcmp(e->name, name) != 0 || e->dev != 1) { logf("bridge: %x is not dev builtin '%s'", va, name); return 0; }
+	/* the method table lives in .rdata: unprotect around the write */
+	u32 old;
+	if (!VirtualProtect(&e->dev, 4, 0x04 /* PAGE_READWRITE */, &old)) { logf("bridge: VirtualProtect failed for '%s'", name); return 0; }
 	e->dev = 0;
+	VirtualProtect(&e->dev, 4, old, &old);
 	return 1;
 }
 

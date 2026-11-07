@@ -81,31 +81,9 @@ levels_main()
 		c.shared_flags = [];
 	c.hide_count = 0;
 	c.sync = [];
-	switch ( level.script )
-	{
-		case "killhouse":         maps\_coop_lvl_killhouse::main(); break;
-		case "cargoship":         maps\_coop_lvl_cargoship::main(); break;
-		case "coup":              maps\_coop_lvl_coup::main(); break;
-		case "blackout":          maps\_coop_lvl_blackout::main(); break;
-		case "armada":            maps\_coop_lvl_armada::main(); break;
-		case "bog_a":             maps\_coop_lvl_bog_a::main(); break;
-		case "hunted":            maps\_coop_lvl_hunted::main(); break;
-		case "ac130":             maps\_coop_lvl_ac130::main(); break;
-		case "bog_b":             maps\_coop_lvl_bog_b::main(); break;
-		case "airlift":           maps\_coop_lvl_airlift::main(); break;
-		case "aftermath":         maps\_coop_lvl_aftermath::main(); break;
-		case "village_assault":   maps\_coop_lvl_village_assault::main(); break;
-		case "scoutsniper":       maps\_coop_lvl_scoutsniper::main(); break;
-		case "sniperescape":      maps\_coop_lvl_sniperescape::main(); break;
-		case "village_defend":    maps\_coop_lvl_village_defend::main(); break;
-		case "ambush":            maps\_coop_lvl_ambush::main(); break;
-		case "icbm":              maps\_coop_lvl_icbm::main(); break;
-		case "launchfacility_a":  maps\_coop_lvl_launchfacility_a::main(); break;
-		case "launchfacility_b":  maps\_coop_lvl_launchfacility_b::main(); break;
-		case "jeepride":          maps\_coop_lvl_jeepride::main(); break;
-		case "airplane":          maps\_coop_lvl_airplane::main(); break;
-		default: break;
-	}
+	// the level's own main() exported its module (tools/patches.py LEVEL_PATCHES)
+	if ( isdefined( level.coop_fn_level_main ) )
+		[[ level.coop_fn_level_main ]]();
 }
 
 // ---------------------------------------------------------------------------------------------

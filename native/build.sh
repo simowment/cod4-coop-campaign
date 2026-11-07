@@ -23,11 +23,22 @@ QueryPerformanceCounter@4
 QueryPerformanceFrequency@4
 GetTickCount@0
 OutputDebugStringA@4
+GetFileAttributesA@4
+DeleteFileA@4
+CreateThread@24
+Sleep@4
 EOF
 cat > build/u32.def <<'EOF'
 LIBRARY user32.dll
 EXPORTS
 MessageBoxA@16
+GetForegroundWindow@0
+SetForegroundWindow@4
+SetWindowPos@28
+IsWindow@4
+SetWindowLongA@12
+CallWindowProcA@20
+PostMessageA@16
 EOF
 dlltool -m i386 --as-flags=--32 -k -d build/k32.def -l build/libk32.a
 dlltool -m i386 --as-flags=--32 -k -d build/u32.def -l build/libu32.a

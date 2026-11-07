@@ -10,13 +10,27 @@ def export_fn(level_file, zone, exports):
     """Level scripts live only in their own fastfile, so mod modules (compiled in every level) cannot
     reference them. The level's main() hands the functions over as level.coop_fn_<name> pointers."""
     lines = ''.join('\tlevel.coop_fn_%s = %s;' % (n, ref) + NL for n, ref in exports)
-    return {'file': level_file, 'zones': (zone,), 'edits': [(r'^main\(\)\r?\n\{\r?\n', 'after', lines)]}
+    return {'file': level_file, 'zones': (zone,), 'edits': [(r'^main\(\)[ \t]*\r?\n(?:[ \t]*\r?\n)*\{[ \t]*\r?\n', 'after', lines)]}
 
 
-PATCHES = [
-    export_fn('maps/bog_a.gsc', 'bog_a', [('abrams_gets_drawing', 'maps\\bog_a_backhalf::abrams_gets_drawing')]),
-    export_fn('maps/village_assault.gsc', 'village_assault', [('do_alasad', 'maps\\village_assault_code::do_alasad')]),
-    export_fn('maps/village_defend.gsc', 'village_defend', [('tavern_storming_delay', '::tavern_storming_delay')]),
+LEVELS = ['killhouse', 'cargoship', 'coup', 'blackout', 'armada', 'bog_a', 'hunted', 'ac130', 'bog_b',
+          'airlift', 'aftermath', 'village_assault', 'scoutsniper', 'sniperescape', 'village_defend', 'ambush',
+          'icbm', 'launchfacility_a', 'launchfacility_b', 'jeepride', 'airplane']
+
+# Extra level functions that a level's coop module calls (they only exist in that level's fastfile).
+LEVEL_EXTRA_EXPORTS = {
+    'bog_a': [('abrams_gets_drawing', 'maps\\bog_a_backhalf::abrams_gets_drawing')],
+    'village_assault': [('do_alasad', 'maps\\village_assault_code::do_alasad')],
+    'village_defend': [('tavern_storming_delay', '::tavern_storming_delay')],
+}
+
+# Each level's main() points at its own coop module, so a level only compiles its module. Referencing all
+# 21 from common code made every level compile all of them and overflow the script variable pool on bog_a.
+LEVEL_PATCHES = [export_fn('maps/%s.gsc' % lv, lv,
+                           [('level_main', 'maps\\_coop_lvl_%s::main' % lv)] + LEVEL_EXTRA_EXPORTS.get(lv, []))
+                 for lv in LEVELS]
+
+PATCHES = LEVEL_PATCHES + [
     {
         'file': 'maps/_load.gsc',
         'edits': [
