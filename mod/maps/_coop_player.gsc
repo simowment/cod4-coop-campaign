@@ -90,7 +90,6 @@ get_up( reason )
 	if ( !c.down )
 		return;
 	c.down = false;
-	level notify( "coop_up" );
 	p allowstand( true );
 	p allowcrouch( true );
 	p allowsprint( true );
@@ -103,6 +102,7 @@ get_up( reason )
 		p disableinvulnerability();
 	maps\_coop::send( "D|0" );
 	maps\_coop::log( "up: " + reason );
+	level notify( "coop_up" ); // last: the bleed-out thread ends on this
 }
 
 bleed_out()
@@ -118,7 +118,7 @@ bleed_out()
 		pos = ( fgetarg( s, 0 ), fgetarg( s, 1 ), fgetarg( s, 2 ) );
 		level.player setorigin( safe_spot_near( pos ) );
 		iprintlnbold( "You regrouped with " + c.names[ s ] );
-		get_up( "bleed out respawn" );
+		thread get_up( "bleed out respawn" ); // own thread: bleed_out ends on coop_up
 		return;
 	}
 	wipe();

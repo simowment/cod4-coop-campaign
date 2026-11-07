@@ -63,6 +63,9 @@ find_character()
 			if ( !isdefined( allies[ i ].model ) || allies[ i ].model == "" )
 				continue;
 			// prefer a regular soldier over a named hero (Price, Gaz...) so the buddy is not a clone
+			m = tolower( allies[ i ].model );
+			if ( issubstr( m, "vip" ) || issubstr( m, "civilian" ) || issubstr( m, "price" ) || issubstr( m, "gaz" ) || issubstr( m, "griggs" ) || issubstr( m, "nikolai" ) )
+				continue; // never dress the squadmate as a story character
 			if ( !isdefined( allies[ i ].animname ) && !isdefined( allies[ i ].magic_bullet_shield ) )
 			{
 				best = allies[ i ];
@@ -261,7 +264,9 @@ set_puppet_anim( name )
 	pa = level.coop.puppet_anims[ name ];
 	if ( !isdefined( self.coop_pos ) )
 		return;
+	// also re-anchor when the anim's own root motion has carried the model away from the network pose
 	moved = !isdefined( self.coop_anchor ) || distance( self.coop_anchor, self.coop_pos ) > 1
+		|| distance( self.origin, self.coop_pos ) > 4
 		|| abs( angle180( self.coop_anchor_yaw - self.coop_yaw ) ) > 2;
 	if ( !changed && !moved )
 		return;

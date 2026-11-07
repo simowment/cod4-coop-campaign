@@ -106,6 +106,8 @@ send( msg )
 	if ( !level.coop.active )
 		return;
 	fprintln( level.script + "|" + msg ); // events are tagged with the level they belong to
+	if ( getdvar( "coop_debug" ) == "1" && getsubstr( msg, 0, 2 ) != "W|" )
+		log( "send " + msg );
 }
 
 players()
@@ -159,13 +161,14 @@ net_loop()
 		apply_pending_flags();
 		maps\_coop_puppet::update_all();
 		test_teleport();
+		test_command();
 		c.hb = c.hb + 1;
 		if ( c.hb % 100 == 0 && getdvar( "coop_heartbeat" ) == "1" )
 			log( "hb t=" + gettime() + " pos=" + level.player.origin + " players=" + players() + " puppets=" + c.puppets.size );
 		if ( c.hb % 100 == 0 && getdvar( "coop_heartbeat" ) == "1" )
 			for ( ps = 0; ps < c.max; ps++ )
 				if ( isdefined( c.puppets[ ps ] ) )
-					log( "  puppet " + ps + " at " + c.puppets[ ps ].origin + " net " + ( fgetarg( ps, 0 ), fgetarg( ps, 1 ), fgetarg( ps, 2 ) ) + " hidden " + c.puppets[ ps ].coop_hidden + " anim " + c.puppets[ ps ].coop_anim + " flags " + fgetarg( ps, 5 ) );
+					log( "  puppet " + ps + " weapon '" + c.puppets[ ps ].coop_weapon + "' remote '" + c.remote_weapon[ ps ] + "' at " + c.puppets[ ps ].origin + " net " + ( fgetarg( ps, 0 ), fgetarg( ps, 1 ), fgetarg( ps, 2 ) ) + " hidden " + c.puppets[ ps ].coop_hidden + " anim " + c.puppets[ ps ].coop_anim + " flags " + fgetarg( ps, 5 ) );
 		wait 0.05;
 	}
 }
@@ -184,6 +187,59 @@ test_teleport()
 	if ( t.size >= 4 )
 		level.player setplayerangles( ( 0, int( t[ 3 ] ), 0 ) );
 	log( "test teleport " + v );
+}
+
+// test hook: "set coop_test_cmd <killnear|hurt|save|nextmission|fail>" (automated tests only)
+test_command()
+{
+	v = getdvar( "coop_test_cmd" );
+	if ( v == "" )
+		return;
+	setdvar( "coop_test_cmd", "" );
+	log( "test cmd " + v );
+	if ( v == "killnear" )
+	{
+		ai = getaiarray( "axis" );
+		best = undefined;
+		for ( i = 0; i < ai.size; i++ )
+			if ( isalive( ai[ i ] ) && isdefined( ai[ i ].coop_id ) && ( !isdefined( best ) || distance( ai[ i ].origin, level.player.origin ) < distance( best.origin, level.player.origin ) ) )
+				best = ai[ i ];
+		if ( isdefined( best ) )
+		{
+			log( "test kill " + best.coop_id );
+			best dodamage( best.health + 500, best.origin, level.player );
+		}
+		else
+			log( "test kill: no axis with an id (" + ai.size + " axis alive)" );
+	}
+	else if ( v == "hurt" )
+		level.player dodamage( level.player.health - 1, level.player.origin );
+	else if ( v == "save" )
+		thread maps\_autosave::tryAutoSave( "coop_test" );
+	else if ( v == "forcesave" )
+	{
+		id = saveGameNoCommit( "coop_test", maps\_autosave::getDescription() );
+		wait 0.05;
+		if ( id >= 0 )
+		{
+			commitSave( id );
+			log( "forced checkpoint committed" );
+			on_autosaved( "coop_test" );
+		}
+	}
+	else if ( v == "nextmission" )
+		thread maps\_utility::nextmission();
+	else if ( v == "fail" )
+		thread maps\_utility::missionFailedWrapper();
+	else if ( v == "status" )
+	{
+		ai = getaiarray( "axis" );
+		ids = 0;
+		for ( i = 0; i < ai.size; i++ )
+			if ( isdefined( ai[ i ].coop_id ) )
+				ids++;
+		log( "status axis=" + ai.size + " with_id=" + ids + " health=" + level.player.health + " down=" + level.coop.down );
+	}
 }
 
 drain_stale_events()
@@ -308,6 +364,8 @@ register_handlers()
 
 dispatch( s )
 {
+	if ( getdvar( "coop_debug" ) == "1" )
+		log( "recv " + s );
 	tok = strtok( s, "|" );
 	if ( tok.size < 2 )
 		return;
