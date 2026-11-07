@@ -59,3 +59,14 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
 - Fake-AI script models only animate via animscripted with full-body anims, drawn at the anchor (re-anchor per pose).
 - `loc_warnings` and `fs_game` are internal or write-protected for scripts; set loc_warnings on the command line or through Cbuf.
 - getentnum/getentbynum are dev builtins with full retail implementations; the method table is in .rdata (VirtualProtect).
+
+## In-game verification, round 2
+- Start points follow the host (~MAP|map|start -> "set start X; map Y"); cargoship `end` start matched on both.
+- Cargoship ending: host flag end_start_player_anim -> client pulled to the jump spot, both play their own rescue scene. No coop-caused script errors (the remaining `self.position` error at cargoship_code.gsc:555 happens identically without a second player, from the dev start point).
+- Down/revive round trip: D|1 -> downed HUD with countdown -> V|1 from the squadmate -> up at 50% health, D|0.
+
+## Bugs found by playing (fixed)
+1. Remote flags applied immediately raced the receiver's own setup (cargoship heroes_ready -> runtime error, which is fatal in retail). Remote flags now wait 4 s, are skipped if the world set them itself, and are never applied in the first 15 s of a level.
+2. `delete()` fires "death": the host's kill sync killed story AI on the client. Only real deaths of axis AI are synced now.
+3. get_up() notified the event its caller (bleed_out) ended on, which killed the get-up halfway.
+4. `anim` is a reserved global; prone_crawl root motion dragged the puppet away; VIP models were used as the squadmate.

@@ -227,6 +227,8 @@ test_command()
 		else
 			log( "test flag: no such flag " + f );
 	}
+	else if ( v == "down" )
+		maps\_coop_player::go_down();
 	else if ( v == "revive" )
 	{
 		for ( s = 0; s < level.coop.max; s++ )
