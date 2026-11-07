@@ -19,9 +19,10 @@ PATCHES = [
     {
         'file': 'common_scripts/utility.gsc',
         'edits': [
-            # flag_set: replicate set transitions
-            (r'^\tlevel\.flag\[ message \] = true;\r?\n\tlevel notify\( message \);\r?\n', 'after',
-             '\tif ( isdefined( level.coop_flag_hook ) )' + NL + '\t\t[[ level.coop_flag_hook ]]( message, true );' + NL),
+            # flag_set: replicate real false->true transitions only (checked before the assignment)
+            (r'^\tlevel\.flag\[ message \] = true;\r?\n\tlevel notify\( message \);\r?\n', 'before',
+             '\tif ( isdefined( level.coop_flag_hook ) && isdefined( level.flag[ message ] ) && !level.flag[ message ] )' + NL
+             + '\t\t[[ level.coop_flag_hook ]]( message, true );' + NL),
             # flag_clear: replicate clear transitions
             (r'^\t\tlevel\.flag\[ message \] = false;\r?\n\t\tlevel notify\( message \);\r?\n', 'after',
              '\t\tif ( isdefined( level.coop_flag_hook ) )' + NL + '\t\t\t[[ level.coop_flag_hook ]]( message, false );' + NL),

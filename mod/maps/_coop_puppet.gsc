@@ -42,7 +42,9 @@ init()
 	a[ "downed" ] = %prone_aim_5;
 	level.coop.puppet_anims = a;
 	thread find_character();
-	thread share_enemy_attention();
+	// levels whose scripts drive AI with setentitytarget themselves: leave their targeting alone
+	if ( level.script != "ambush" && level.script != "bog_a" && level.script != "blackout" && level.script != "cargoship" )
+		thread share_enemy_attention();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -364,7 +366,13 @@ replay_shots( slot, flags, pos, pitch, yaw )
 		return; // nothing new, or a stale burst after a hitch
 
 	rw = c.remote_weapon[ slot ];
-	if ( !is_known_weapon( rw ) || weaponclass( rw ) == "grenade" )
+	if ( !is_known_weapon( rw ) )
+		return;
+	wc = weaponclass( rw );
+	// bullets only: replaying a rocket or grenade launcher would detonate real explosives here
+	if ( wc != "rifle" && wc != "smg" && wc != "mg" && wc != "pistol" && wc != "spread" && wc != "sniper" )
+		return;
+	if ( issubstr( rw, "gl_" ) || issubstr( rw, "rpg" ) || issubstr( rw, "at4" ) || issubstr( rw, "m203" ) || issubstr( rw, "gp25" ) )
 		return;
 
 	stance = flags & 3;
@@ -380,7 +388,9 @@ replay_shots( slot, flags, pos, pitch, yaw )
 	start = eye + vectorscale( fwd, 24 );
 
 	// never let a replayed shot hit the local player
-	if ( distance_to_segment( level.player geteye(), start, dest ) < 36 )
+	if ( distance_to_segment( level.player geteye(), start, dest ) < 40 )
+		return;
+	if ( distance_to_segment( level.player.origin + ( 0, 0, 30 ), start, dest ) < 40 )
 		return;
 	for ( i = 0; i < n; i++ )
 		magicbullet( rw, start, dest );

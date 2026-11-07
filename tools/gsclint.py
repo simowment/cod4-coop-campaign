@@ -101,6 +101,11 @@ def lint(path, res, builtins):
         st = line.strip()
         if depth == 0 and st and not st.startswith('#') and not FUNC_DEF.match(st) and st not in ('{', '}'):
             errs.append('%s:%d: statement at file scope: %s' % (path, ln, st[:60]))
+        if depth > 0 and FUNC_DEF.match(st) and ln < len(lines) and lines[ln].strip() == '{' \
+                and not re.match(r'^(if|while|for|switch)\b', st):
+            errs.append('%s:%d: function definition inside a function body: %s' % (path, ln, st[:60]))
+        if re.search(r'\bthread\s*$', st) or re.search(r'\bthread\s*;', st):
+            errs.append('%s:%d: dangling thread keyword' % (path, ln))
         depth += line.count('{') - line.count('}')
     # calls
     for ln, line in enumerate(lines, 1):

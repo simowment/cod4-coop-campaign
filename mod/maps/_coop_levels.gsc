@@ -38,7 +38,7 @@ is_local_flag( msg )
 	if ( isdefined( level.coop.local_flags[ msg ] ) )
 		return true;
 	// conventions used across the campaign scripts for flags about "the" player's own state
-	if ( issubstr( msg, "player_" ) && !isdefined( level.coop.shared_flags[ msg ] ) )
+	if ( issubstr( msg, "player_" ) && !( isdefined( level.coop.shared_flags ) && isdefined( level.coop.shared_flags[ msg ] ) ) )
 		return true;
 	if ( getsubstr( msg, 0, 3 ) == "aa_" )
 		return true;
@@ -126,13 +126,21 @@ hide_between( startFlag, endFlag )
 hide_between_proc( startFlag, endFlag )
 {
 	if ( isdefined( startFlag ) )
-		flag_wait( startFlag );
+		safe_flag_wait( startFlag );
 	level.coop.hide_count++;
 	if ( isdefined( endFlag ) )
 	{
-		flag_wait( endFlag );
+		safe_flag_wait( endFlag );
 		level.coop.hide_count--;
 	}
+}
+
+// flag_wait that tolerates a flag which is flag_init'ed later (or by another start point)
+safe_flag_wait( name )
+{
+	while ( !isdefined( level.flag ) || !isdefined( level.flag[ name ] ) )
+		wait 0.25;
+	flag_wait( name );
 }
 
 hide_for( seconds )
@@ -147,7 +155,7 @@ hide_for( seconds )
 // ---------------------------------------------------------------------------------------------
 
 // When flag is set (by either player), anyone farther than radius from target is moved next to it.
-// target: an entity, a struct with .origin, or a vector.
+// target: an entity, a struct with .origin, or a targetname string.
 pull_on_flag( flagName, target, radius )
 {
 	level thread pull_on_flag_proc( flagName, target, radius );
@@ -155,7 +163,7 @@ pull_on_flag( flagName, target, radius )
 
 pull_on_flag_proc( flagName, target, radius )
 {
-	flag_wait( flagName );
+	safe_flag_wait( flagName );
 	if ( !maps\_coop::in_coop() )
 		return;
 	pos = target_pos( target );
@@ -174,15 +182,15 @@ pull_to_buddy_on_flag( flagName, radius )
 
 pull_to_buddy_proc( flagName, radius )
 {
-	flag_wait( flagName );
+	safe_flag_wait( flagName );
 	if ( !maps\_coop::in_coop() )
 		return;
 	c = level.coop;
 	best = undefined;
 	bestd = 999999;
-	for ( s = 0; s < c.max; s++ )
+	for ( s = 0; s < c.slot; s++ ) // lower slots (the host first) are the anchors
 	{
-		if ( s == c.slot || !maps\_coop::slot_connected( s ) )
+		if ( !maps\_coop_player::buddy_pose_ok( s ) )
 			continue;
 		pos = ( fgetarg( s, 0 ), fgetarg( s, 1 ), fgetarg( s, 2 ) );
 		d = distance( level.player.origin, pos );
@@ -220,9 +228,7 @@ target_pos( target )
 			return s.origin;
 		return undefined;
 	}
-	if ( isdefined( target.origin ) )
-		return target.origin;
-	return target;
+	return target.origin;
 }
 
 isstring_ent_name( t )
@@ -319,6 +325,6 @@ sync_on_flag( flagName, timeout, hudtext )
 
 sync_on_flag_proc( flagName, timeout, hudtext )
 {
-	flag_wait( flagName );
+	safe_flag_wait( flagName );
 	sync_point( "f_" + flagName, timeout, hudtext );
 }

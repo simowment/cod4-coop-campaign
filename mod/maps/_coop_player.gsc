@@ -69,6 +69,7 @@ go_down()
 	c.down = true;
 	c.down_since = gettime();
 	p enableinvulnerability();
+	c.saved_ignoreme = p.ignoreme;
 	p.ignoreme = true;
 	p allowstand( false );
 	p allowcrouch( false );
@@ -95,8 +96,11 @@ get_up( reason )
 	p allowsprint( true );
 	p setstance( "stand" );
 	p.ignoreme = false;
+	if ( isdefined( c.saved_ignoreme ) )
+		p.ignoreme = c.saved_ignoreme;
 	p.health = int( p.maxhealth * 0.5 );
-	p disableinvulnerability();
+	if ( !isdefined( level.nextmission ) )
+		p disableinvulnerability();
 	maps\_coop::send( "D|0" );
 	maps\_coop::log( "up: " + reason );
 }
@@ -109,7 +113,7 @@ bleed_out()
 	// respawn on a squadmate who is still standing
 	for ( s = 0; s < c.max; s++ )
 	{
-		if ( s == c.slot || !maps\_coop::slot_connected( s ) || c.downed[ s ] )
+		if ( s == c.slot || c.downed[ s ] || !buddy_pose_ok( s ) )
 			continue;
 		pos = ( fgetarg( s, 0 ), fgetarg( s, 1 ), fgetarg( s, 2 ) );
 		level.player setorigin( safe_spot_near( pos ) );
@@ -236,6 +240,19 @@ ev_revive( slot, tok )
 		return;
 	iprintlnbold( c.names[ slot ] + " revived you" );
 	get_up( "revived by " + slot );
+}
+
+// is slot's pose recent, and is that player standing in the world (not in a rig/vehicle)?
+buddy_pose_ok( s )
+{
+	if ( s == level.coop.slot || !maps\_coop::slot_connected( s ) )
+		return false;
+	if ( fgetarg( s, 10 ) > 1000 )
+		return false;
+	flags = int( fgetarg( s, 5 ) );
+	if ( ( flags & 32 ) != 0 )
+		return false;
+	return !( fgetarg( s, 0 ) == 0 && fgetarg( s, 1 ) == 0 && fgetarg( s, 2 ) == 0 );
 }
 
 // a point next to a squadmate that we can stand on

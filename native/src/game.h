@@ -3,6 +3,7 @@
 #include "rt.h"
 
 #define IW3SP_EXE_SIZE 3017216u
+#define IW3SP_TIMESTAMP 0x47044075u
 
 /* builtin table entries {const char *name; void (*fn)(void); int developer;} */
 #define BT_OPENFILE     0x6de7b4

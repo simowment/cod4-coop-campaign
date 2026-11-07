@@ -50,6 +50,7 @@ typedef struct {
 	/* timing */
 	u32 lastRemoteSendT; double lastRemoteRecvLocal;
 	double rtt;
+	int overflow;
 } Link;
 
 typedef struct { double localRecv; u32 remoteT; Pose p; } Sample;
@@ -76,7 +77,7 @@ static struct {
 	Slot slots[NET_MAX_PLAYERS];
 	Pose localPose; int havePose;
 	char localMap[64], hostMap[64];
-	char pendingMap[64]; double lastMapCmd;
+	char pendingMap[64]; double lastMapCmd; char lastMapCmdName[64];
 	/* inbound queue to GSC */
 	char inq[256][NET_EVT_MAX + 8]; int inHead, inCount;
 	double hostOffset; int haveHostOffset;
@@ -102,7 +103,7 @@ static void link_reset(Link *l)
 
 static int link_queue(Link *l, int origin, const char *txt)
 {
-	if ((u16)(l->nextOut - l->ackedOut) >= RQ - 1) { logf("net: reliable queue full"); return 0; }
+	if ((u16)(l->nextOut - l->ackedOut) >= RQ - 1) { logf("net: reliable queue full"); l->overflow = 1; return 0; }
 	REvt *e = &l->out[l->nextOut % RQ];
 	e->id = l->nextOut++;
 	e->origin = (u8)origin;
@@ -218,6 +219,16 @@ static void broadcast_from(int origin, const char *txt, int exceptSlot)
 
 static void sys_event(const char *payload) { inq_push("s", payload); }
 
+static int valid_mapname(const char *m)
+{
+	int n = 0;
+	for (; *m; m++, n++) {
+		char c = *m;
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) return 0;
+	}
+	return n > 0 && n < 64;
+}
+
 static void handle_control(int origin, const char *txt)
 {
 	/* ~MAP|name  ~JOIN|slot|name  ~NAME|slot|name  ~PART|slot */
@@ -227,6 +238,7 @@ static void handle_control(int origin, const char *txt)
 	for (char *p = a; *p; p++) if (*p == '|') { *p = 0; if (!b) b = p + 1; else if (!c) { c = p + 1; break; } }
 	(void)origin;
 	if (!strcmp(a, "MAP") && b) {
+		if (!valid_mapname(b)) { logf("net: ignoring bad map name from host"); return; }
 		strlcpy_(N.hostMap, b, sizeof N.hostMap);
 		logf("net: host map is '%s'", N.hostMap);
 		if (!N.host && stricmp_(N.hostMap, N.localMap) != 0) { strlcpy_(N.pendingMap, N.hostMap, sizeof N.pendingMap); N.pendingSince = now_ms(); }
@@ -320,8 +332,10 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 		if (h->type == PT_HELLO) {
 			char name[32]; int nl = len - (int)sizeof(PktHdr); if (nl > 31) nl = 31; if (nl < 0) nl = 0;
 			memcpy(name, buf + sizeof(PktHdr), nl); name[nl] = 0;
+			for (int k = 0; k < nl; k++) if (name[k] == '|' || name[k] == '~' || (u8)name[k] < 32) name[k] = '_';
 			int s = -1;
 			for (int i = 1; i < N.maxPlayers; i++) if (N.links[i].used && addr_eq(&N.links[i].addr, from)) s = i;
+			if (s > 0 && N.links[s].lastIn) { host_drop(s, "rejoin"); s = -1; }
 			int fresh = 0;
 			if (s < 0) for (int i = 1; i < N.maxPlayers; i++) if (!N.links[i].used) { s = i; fresh = 1; break; }
 			u8 out[96]; PktHdr *o = (PktHdr *)out;
@@ -369,10 +383,10 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 		int nev = buf[off++];
 		for (int i = 0; i < nev && off + 4 <= len; i++) {
 			u16 id = (u16)(buf[off] | (buf[off + 1] << 8)); int ln = buf[off + 3];
-			if (off + 4 + ln > len) break;
+			if (off + 4 + ln > len || ln > NET_EVT_MAX) return;
 			char txt[NET_EVT_MAX + 1]; memcpy(txt, buf + off + 4, ln); txt[ln] = 0;
 			off += 4 + ln;
-			if (id == (u16)(l->lastIn + 1)) { l->lastIn = id; deliver(l, s, s, txt); }
+			if (id == (u16)(l->lastIn + 1)) { if (N.inCount >= 240) break; l->lastIn = id; deliver(l, s, s, txt); }
 		}
 		return;
 	}
@@ -380,8 +394,9 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 	/* client */
 	if (!addr_eq(from, &N.hostAddr)) return;
 	Link *l = &N.links[0];
-	if (h->type == PT_REJECT) { logf("net: host rejected us (full)"); sys_event("R"); N.configured = 0; return; }
+	if (h->type == PT_REJECT) { logf("net: host rejected us (full)"); sys_event("R"); N.configured = 0; N.barrier = 0; return; }
 	if (h->type == PT_WELCOME) {
+		if (len < (int)sizeof(PktHdr) + 2 || buf[sizeof(PktHdr)] >= NET_MAX_PLAYERS) return;
 		if (!N.joined) {
 			N.joined = 1; N.session = h->session;
 			N.localSlot = buf[sizeof(PktHdr)]; N.maxPlayers = buf[sizeof(PktHdr) + 1];
@@ -393,7 +408,7 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 		return;
 	}
 	if (!N.joined || h->session != N.session) return;
-	if (h->type == PT_BYE) { logf("net: host ended session"); sys_event("H"); N.joined = 0; N.configured = 0; return; }
+	if (h->type == PT_BYE) { logf("net: host ended session"); sys_event("H"); N.joined = 0; N.configured = 0; N.barrier = 0; return; }
 	if (h->type != PT_DATA) return;
 	l->lastRecv = now;
 	if (seq_gt(h->ack, l->ackedOut)) l->ackedOut = h->ack;
@@ -415,10 +430,10 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 	int nev = buf[off++];
 	for (int i = 0; i < nev && off + 4 <= len; i++) {
 		u16 id = (u16)(buf[off] | (buf[off + 1] << 8)); int origin = buf[off + 2]; int ln = buf[off + 3];
-		if (off + 4 + ln > len) break;
+		if (off + 4 + ln > len || ln > NET_EVT_MAX) return;
 		char txt[NET_EVT_MAX + 1]; memcpy(txt, buf + off + 4, ln); txt[ln] = 0;
 		off += 4 + ln;
-		if (id == (u16)(l->lastIn + 1)) { l->lastIn = id; deliver(l, 0, origin, txt); }
+		if (id == (u16)(l->lastIn + 1)) { if (N.inCount >= 240) break; l->lastIn = id; deliver(l, 0, origin, txt); }
 	}
 }
 
@@ -502,7 +517,7 @@ void net_tick(void)
 	for (int k = 0; k < 64; k++) {
 		sockaddr_in from; int fl = sizeof from;
 		int n = precvfrom(N.sock, buf, sizeof buf, 0, &from, &fl);
-		if (n <= 0) break;
+		if (n <= 0) { if (n < 0 && pWSAGetLastError() == 10054) continue; break; }
 		on_packet(buf, n, &from);
 		if (!N.configured) return;
 	}
@@ -517,14 +532,34 @@ void net_tick(void)
 		}
 		return;
 	}
+	/* overflowed reliable queues: that link has lost events, so restart it */
+	if (N.host) {
+		for (int s = 1; s < NET_MAX_PLAYERS; s++)
+			if (N.links[s].used && N.links[s].overflow) {
+				u8 out[16]; PktHdr *h = (PktHdr *)out; fill_hdr(h, PT_BYE, 0, 0);
+				sendto_addr(&N.links[s].addr, out, sizeof(PktHdr));
+				host_drop(s, "reliable queue overflow");
+			}
+	} else if (N.links[0].overflow) {
+		logf("net: reliable queue to host overflowed, leaving");
+		net_leave(); sys_event("H"); return;
+	}
 	/* timeouts */
 	if (N.host) {
 		for (int s = 1; s < NET_MAX_PLAYERS; s++)
 			if (N.links[s].used && now - N.links[s].lastRecv > TIMEOUT_MS) host_drop(s, "timeout");
 	} else if (now - N.links[0].lastRecv > TIMEOUT_MS) {
-		logf("net: host timed out"); sys_event("H"); N.joined = 0; N.configured = 0; return;
+		logf("net: host timed out"); sys_event("H"); N.joined = 0; N.configured = 0; N.barrier = 0; return;
 	}
-	if (N.barrier && now - N.barrierStart > (N.levelsLoaded <= 1 && N.minPlayers > 1 ? 300000.0 : 90000.0)) { N.barrier = 0; logf("net: barrier timeout"); sys_event("G"); }
+	if (N.barrier) {
+		double limit = N.host ? (N.levelsLoaded <= 1 && N.minPlayers > 1 ? 300000.0 : 90000.0) : 330000.0;
+		if (now - N.barrierStart > limit) {
+			N.barrier = 0;
+			logf("net: barrier timeout");
+			if (N.host) { char t[96]; fmt(t, sizeof t, "~GO|%s", N.localMap); broadcast_from(0, t, -1); }
+			sys_event("G");
+		}
+	}
 	int pending = 0;
 	for (int s = 0; s < NET_MAX_PLAYERS; s++) if (N.links[s].used && N.links[s].ackedOut != (u16)(N.links[s].nextOut - 1)) pending = 1;
 	if (now - N.lastSend < (pending ? 16.0 : SEND_INTERVAL)) return;
@@ -544,11 +579,13 @@ void net_frame_main(void)
 	if (N.pendingMap[0] && stricmp_(N.pendingMap, N.localMap) != 0) {
 		double now = now_ms();
 		/* at the menu follow at once; in a level give the game's own transition 8 s to get there first */
-		if ((!N.localMap[0] || now - N.pendingSince > 8000.0) && now - N.lastMapCmd > 20000.0) {
+		int same = !stricmp_(N.lastMapCmdName, N.pendingMap);
+		if ((!N.localMap[0] || now - N.pendingSince > 8000.0) && now - N.lastMapCmd > (same ? 90000.0 : 3000.0)) {
 			char cmd[96]; fmt(cmd, sizeof cmd, "map %s\n", N.pendingMap);
 			logf("net: following host -> %s", cmd);
 			cbuf_add_text(cmd);
 			N.lastMapCmd = now;
+			strlcpy_(N.lastMapCmdName, N.pendingMap, sizeof N.lastMapCmdName);
 		}
 	}
 }
@@ -560,7 +597,7 @@ void net_leave(void)
 	if (N.host) { for (int s = 1; s < NET_MAX_PLAYERS; s++) if (N.links[s].used) sendto_addr(&N.links[s].addr, out, sizeof(PktHdr)); }
 	else if (N.joined) sendto_addr(&N.hostAddr, out, sizeof(PktHdr));
 	logf("net: left session");
-	N.configured = 0; N.joined = 0;
+	N.configured = 0; N.joined = 0; N.barrier = 0;
 }
 
 int net_active(void) { return N.configured && N.joined; }
@@ -654,5 +691,5 @@ void net_set_map(const char *map)
 		link_queue(&N.links[0], N.localSlot, t);
 	}
 }
-int net_barrier(void) { return N.barrier; }
+int net_barrier(void) { return net_active() && N.barrier; }
 const char *net_host_map(void) { return N.host ? N.localMap : N.hostMap; }

@@ -12,6 +12,8 @@ typedef s32 (WINAPI *Present_t)(void *self, const void *src, const void *dst, vo
 static Direct3DCreate9_t real_create;
 static CreateDevice_t real_CreateDevice;
 static Present_t real_Present;
+typedef s32 (WINAPI *SCPresent_t)(void *self, const void *src, const void *dst, void *hwnd, const void *dirty, u32 flags);
+static SCPresent_t real_SCPresent;
 static int g_enabled, g_started;
 
 static int patch_vtable(void **vt, int idx, void *fn, void **orig)
@@ -25,14 +27,25 @@ static int patch_vtable(void **vt, int idx, void *fn, void **orig)
 	return 1;
 }
 
+static void frame_tick(void)
+{
+	if (!g_enabled) return;
+	net_frame_main();
+	if (net_barrier()) dvar_set_int("cl_paused", 1);
+	else if (g_forceUnpause && net_active() && net_num_players() > 1) dvar_set_int("cl_paused", 0);
+}
+
 static s32 WINAPI hk_Present(void *self, const void *src, const void *dst, void *hwnd, const void *dirty)
 {
-	if (g_enabled) {
-		net_frame_main();
-		if (net_barrier()) dvar_set_int("cl_paused", 1);
-		else if (g_forceUnpause && net_active() && net_num_players() > 1) dvar_set_int("cl_paused", 0);
-	}
+	frame_tick();
 	return real_Present(self, src, dst, hwnd, dirty);
+}
+
+/* iw3sp presents through the implicit swap chain, not IDirect3DDevice9::Present */
+static s32 WINAPI hk_SCPresent(void *self, const void *src, const void *dst, void *hwnd, const void *dirty, u32 flags)
+{
+	frame_tick();
+	return real_SCPresent(self, src, dst, hwnd, dirty, flags);
 }
 
 static s32 WINAPI hk_CreateDevice(void *self, u32 adapter, u32 type, void *hwnd, u32 flags, void *pp, void **out)
@@ -40,7 +53,15 @@ static s32 WINAPI hk_CreateDevice(void *self, u32 adapter, u32 type, void *hwnd,
 	s32 hr = real_CreateDevice(self, adapter, type, hwnd, flags, pp, out);
 	if (hr >= 0 && out && *out) {
 		void **vt = *(void ***)*out;
-		if (patch_vtable(vt, 17, (void *)hk_Present, (void **)&real_Present)) logf("proxy: Present hooked");
+		if (patch_vtable(vt, 17, (void *)hk_Present, (void **)&real_Present)) logf("proxy: device Present hooked");
+		/* IDirect3DDevice9::GetSwapChain is vtable 14; IDirect3DSwapChain9::Present is 3, Release is 2 */
+		typedef s32 (WINAPI *GetSwapChain_t)(void *, u32, void **);
+		void *sc = NULL;
+		if (((GetSwapChain_t)vt[14])(*out, 0, &sc) >= 0 && sc) {
+			void **svt = *(void ***)sc;
+			if (patch_vtable(svt, 3, (void *)hk_SCPresent, (void **)&real_SCPresent)) logf("proxy: swapchain Present hooked");
+			((u32 (WINAPI *)(void *))svt[2])(sc);
+		}
 	}
 	return hr;
 }

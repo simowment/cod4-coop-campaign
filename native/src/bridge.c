@@ -49,6 +49,8 @@ static void bi_openfile(void)
 	}
 	if (!strcmp(cmd, "unpause")) { g_forceUnpause = iarg; scr_add_int(1); return; }
 	if (!strcmp(cmd, "barrier")) { scr_add_int(net_barrier()); return; }
+	/* level time heartbeat; returns the previous value. A smaller value than last time means a save was loaded */
+	if (!strcmp(cmd, "tick")) { static int last; int prev = last; last = iarg; scr_add_int(prev); return; }
 	if (!strcmp(cmd, "version")) { scr_add_string(COOP_NATIVE_VERSION); return; }
 	scr_add_int(-2);
 }
@@ -123,7 +125,12 @@ static int patch_one(u32 va, const char *name, void (*fn)(void))
 
 int bridge_verify_exe(void)
 {
-	if ((u32)GetModuleHandleA(NULL) != 0x400000) return 0;
+	u8 *base = (u8 *)GetModuleHandleA(NULL);
+	if ((u32)base != 0x400000) return 0;
+	/* PE header: only iw3sp 1.0 (TimeDateStamp 2007-10-04, SizeOfImage) gets patched; everything else is passthrough */
+	u32 pe = *(u32 *)(base + 0x3c);
+	if (pe > 0x1000 || *(u32 *)(base + pe) != 0x4550) return 0;
+	if (*(u32 *)(base + pe + 8) != IW3SP_TIMESTAMP) return 0;
 	if (*(u8 *)STUB_RET != 0xC3) return 0;
 	static const struct { u32 va; const char *n; } t[] = {
 		{ BT_OPENFILE, "openfile" }, { BT_CLOSEFILE, "closefile" }, { BT_FPRINTLN, "fprintln" },

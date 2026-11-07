@@ -21,6 +21,8 @@ preinit()
 	c = level.coop;
 	c.version = "0.1.0";
 	c.slot = openfile( "coop" );
+	if ( !isdefined( c.slot ) )
+		c.slot = -1; // no native proxy (or unsupported exe): plain single player
 	c.active = ( c.slot >= 0 );
 	c.max = 4;
 	c.names = [];
@@ -30,6 +32,8 @@ preinit()
 	c.ai = [];
 	c.pending_flags = [];
 	c.local_flags = [];
+	c.shared_flags = [];
+	c.cleared_at = [];
 	c.handlers = [];
 	c.shots = 0;
 	c.down = false;
@@ -78,40 +82,9 @@ postinit()
 		thread barrier_hud();
 
 	maps\_coop_levels::main();
+	openfile( "coop", "tick", 0 ); // new level: level time restarts, that is not a checkpoint reload
 	thread net_loop();
-	thread // iw3sp has no islinked(): a linked player (rig, vehicle, scripted camera) moves without velocity,
-// or hangs in the air without falling. Evaluated every frame from send_pose.
-update_linked()
-{
-	c = level.coop;
-	p = level.player;
-	o = p.origin;
-	v = p getvelocity();
-	if ( !isdefined( c.last_origin ) )
-		c.last_origin = o;
-	moved = distance( o, c.last_origin );
-	c.last_origin = o;
-	vel = length( v );
-	sign = 0;
-	if ( moved > 1.5 && vel < 1 )
-		sign = 1;
-	else if ( !( p isonground() ) && abs( v[ 2 ] ) < 1 && vel < 1 )
-		sign = 1;
-	if ( !isdefined( c.link_score ) )
-		c.link_score = 0;
-	if ( sign )
-		c.link_score = min( c.link_score + 1, 10 );
-	else
-		c.link_score = max( c.link_score - 1, 0 );
-	c.linked = c.link_score >= 4;
-}
-
-player_linked()
-{
-	return isdefined( level.coop.linked ) && level.coop.linked;
-}
-
-track_shots();
+	thread track_shots();
 	thread track_weapon();
 	thread watch_death();
 	maps\_coop_player::init();
@@ -172,6 +145,9 @@ net_loop()
 	c = level.coop;
 	for ( ;; )
 	{
+		// a loaded checkpoint rewinds level time; events still queued belong to the dead timeline
+		if ( openfile( "coop", "tick", gettime() ) > gettime() + 500 )
+			drain_stale_events();
 		send_pose();
 		for ( i = 0; i < 64; i++ )
 		{
@@ -184,6 +160,25 @@ net_loop()
 		maps\_coop_puppet::update_all();
 		wait 0.05;
 	}
+}
+
+drain_stale_events()
+{
+	n = 0;
+	for ( i = 0; i < 512; i++ )
+	{
+		s = freadln();
+		if ( !isdefined( s ) || s == "" )
+			break;
+		tok = strtok( s, "|" );
+		if ( tok.size >= 2 && tok[ 0 ] == "s" )
+			sys_event( tok ); // joins/leaves still matter
+		else
+			n++;
+	}
+	level.coop.fail_from_net = undefined;
+	level.coop.fail_sent = undefined;
+	log( "checkpoint reload: dropped " + n + " stale events" );
 }
 
 send_pose()
@@ -342,6 +337,11 @@ sys_event( tok )
 	else if ( type == "H" )
 	{
 		iprintlnbold( "Lost connection to the host" );
+		if ( isdefined( c.end_waiting ) && !isdefined( c.end_ok ) )
+		{
+			c.end_ok = true;
+			thread maps\_endmission::_nextmission();
+		}
 		c.active = false;
 		maps\_coop_puppet::remove_all();
 	}
@@ -389,6 +389,8 @@ on_flag( msg, value )
 		return;
 	if ( !value && !c.ishost )
 		return;
+	if ( !value )
+		c.cleared_at[ msg ] = gettime();
 	v = "0";
 	if ( value )
 		v = "1";
@@ -399,6 +401,9 @@ ev_flag( slot, tok )
 {
 	if ( tok.size < 4 )
 		return;
+	c = level.coop;
+	if ( c.ishost && tok[ 3 ] == "1" && isdefined( c.cleared_at[ tok[ 2 ] ] ) && gettime() - c.cleared_at[ tok[ 2 ] ] < 10000 )
+		return; // stale set from a client that has not caught up with our clear yet
 	apply_flag( tok[ 2 ], tok[ 3 ] == "1" );
 }
 
@@ -636,10 +641,13 @@ ev_save( slot, tok )
 client_save( filename )
 {
 	c = level.coop;
-	if ( c.down || !isalive( level.player ) || level.missionfailed )
+	if ( c.down || !isalive( level.player ) || level.missionfailed || isdefined( level.nextmission ) )
 		return;
-	if ( flag( "game_saving" ) )
+	if ( flag( "game_saving" ) || !flag( "can_save" ) )
 		return;
+	if ( level.player.health < level.player.maxhealth * 0.3 )
+		return; // would trap us in a fail/reload loop; the next host checkpoint will catch us
+	
 	flag_set( "game_saving" );
 	saveId = saveGameNoCommit( filename, maps\_autosave::getDescription() );
 	if ( saveId >= 0 )
@@ -664,6 +672,8 @@ on_missionfailed()
 	c = level.coop;
 	if ( !c.active )
 		return false;
+	if ( isdefined( level.nextmission ) || isdefined( c.end_waiting ) )
+		return true; // the mission is already won
 	if ( isdefined( c.fail_from_net ) || level.missionfailed )
 		return false;
 	c.fail_sent = true;
@@ -674,7 +684,7 @@ on_missionfailed()
 ev_fail( slot, tok )
 {
 	c = level.coop;
-	if ( level.missionfailed || !isalive( level.player ) )
+	if ( level.missionfailed || !isalive( level.player ) || isdefined( level.nextmission ) || isdefined( c.end_waiting ) )
 		return;
 	if ( tok.size >= 3 && tok[ 2 ] != "" )
 		setdvar( "ui_deadquote", tok[ 2 ] );

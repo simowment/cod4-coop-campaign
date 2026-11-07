@@ -79,7 +79,9 @@ def main():
         print('installed d3d9.dll proxy')
     for fn in os.listdir(os.path.join(ROOT, 'launcher')):
         if fn.endswith('.bat'):
-            shutil.copyfile(os.path.join(ROOT, 'launcher', fn), os.path.join(a.game, fn))
+            txt = open(os.path.join(ROOT, 'launcher', fn), encoding='utf-8').read().replace('\r\n', '\n')
+            with open(os.path.join(a.game, fn), 'w', encoding='utf-8', newline='\r\n') as f:
+                f.write(txt)  # cmd.exe wants CRLF
     print('installed launchers')
     print('done ->', out)
 
