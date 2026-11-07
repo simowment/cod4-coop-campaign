@@ -30,8 +30,10 @@
 //    i_hear_him, armada.gsc:1737) a squadmate more than 1500 units away is pulled to the stack-up
 //    trigger "trigger_start_final_breach" so both are in the room for the ending.
 //
-//  * Closest-AI picks from level.player (armada.gsc:506/514/624/638/1709/1711) may choose different
-//    marines per machine - cosmetic only, left alone.
+//  * Closest-AI picks from level.player (armada.gsc:506/514, 1718/1720 final breach room-clear guys,
+//    2012 tv_breacher) may choose different marines per machine - cosmetic only, left alone. The
+//    tv_breacher gets magic_bullet_shield on its own machine, and _coop's ev_kill never kills a
+//    shielded AI remotely, so a host-side death of the other machine's pick cannot break tv_breach.
 //  * g_friendlyfireDist / g_friendlyNameDist saved dvars during the ride (armada.gsc:1424-1455) are
 //    per instance; fine.
 //  * Local-only volumes: ambient triggers (_ambient.gsc:369-400, a remote replay hits an undefined

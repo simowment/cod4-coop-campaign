@@ -19,7 +19,9 @@
 //    "player_sprint" (115-143, 3229) is about the local player's movement -> stays local (default).
 // 5. Barn rear door closes behind the squad on "field_cross" (barn_close_rear_door 1490-1494) ->
 //    a straggler would be locked out: door_straggler() pulls only the player who is farther
-//    from the field_cross trigger than barn_rear_door is (i.e. still behind the door).
+//    from the field_cross trigger than barn_rear_door is (i.e. still behind the door) and who is
+//    not touching the trigger himself (review fix: a wide trigger brush could otherwise pull the
+//    player who set the flag back to the straggler).
 // 6. Field / hit the deck (field_dialgue 1586-1630, field_helicopter_spot 1786-1798): spotlight
 //    check is on the local player but sets the shared flag "field_spoted" -> replicated, fine.
 // 7. Basement (basement_allies 2160-2208): loops until the squad AND level.player are inside volume
@@ -139,16 +141,21 @@ door_straggler( flagName, doorName, aheadName )
 	ahead = getent( aheadName, "targetname" );
 	if ( !isdefined( door ) || !isdefined( ahead ) )
 		return;
-	level thread door_straggler_proc( flagName, door.origin, ahead.origin );
+	level thread door_straggler_proc( flagName, door.origin, ahead );
 }
 
-door_straggler_proc( flagName, doorPos, aheadPos )
+door_straggler_proc( flagName, doorPos, ahead )
 {
+	aheadPos = ahead.origin;
 	flag_wait( flagName );
 	if ( !maps\_coop::in_coop() )
+		return;
+	// the player who set the flag is standing in the trigger: a wide trigger brush can put him
+	// farther from its origin than the door is, so never move someone who is touching it
+	if ( isdefined( ahead ) && level.player istouching( ahead ) )
 		return;
 	limit = distance( doorPos, aheadPos ) - 64;
 	if ( distance( level.player.origin, aheadPos ) <= limit )
 		return;
-	pull_to_buddy_proc( flagName, 0 );
+	pull_to_buddy_proc( flagName, 128 );
 }

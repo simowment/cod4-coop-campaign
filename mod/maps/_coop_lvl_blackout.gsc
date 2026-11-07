@@ -25,10 +25,27 @@
 //    rig -> puppets hidden from player_rappels to player_finishes_rappel (both local flags,
 //    set by each machine's own player_rappel_think, blackout_code.gsc:2056/2072).
 //
+//  * Rappel point (blackout_code.gsc:1942-1945 ally_rappels): the allies only set gaz_rappels and
+//    start their own rappel after flag_wait( "player_at_rappel" ), a flag_set_touching flag
+//    (player_-prefixed, local). gaz_rappels itself is replicated, so on the squadmate's machine the
+//    rope is enabled and the rappel is replayed, but its allies would stay stuck at the top waiting
+//    for its own player to stand in that volume. -> LATCHED (see below): the first player at the
+//    rappel point latches player_at_rappel on every machine.
+//
 //  * Lights-out at the blackout house (blackout.gsc:1216 / blackout_code.gsc:4193): gated on
-//    flag_set_touching "player_at_blackout_door" which is player_-prefixed (local) and a replayed
-//    touch clears itself immediately. -> shared_flag() so the first player at the door starts the
-//    scene on both machines; a squadmate farther than 1200 units is pulled to the door trigger.
+//    flag_set_touching "player_at_blackout_door" (player_-prefixed, local). The scene usually is
+//    not waiting yet when the player gets there (Price/Gaz still walk up, blackout.gsc:1209-1214),
+//    so a replayed touch (set + immediate clear) is lost. shared_flag() does NOT work for a
+//    flag_set_touching flag: the host's replayed touch clears it again and the host's clear is
+//    replicated, wiping the flag on the machine whose player is standing at the door.
+//    -> LATCHED: the trigger is local and the first local set is broadcast as a "latch|<flag>"
+//    event; every machine then keeps the flag set (nothing flag_waitopen()s it, only flag_wait at
+//    blackout.gsc:1216 and blackout_code.gsc:4193). A squadmate farther than 1200 units from the
+//    door trigger is pulled there.
+//
+//  * Overlook (blackout.gsc:581 flag_wait player_near_overlook, flag_set_touching): only feeds
+//    Price's "in position" dialogue before commence_attack, which also arrives replicated from the
+//    machine whose player got there. A late squadmate hears the line when they arrive. -> nothing.
 //
 //  * Evac (blackout.gsc:1336-1417, blackout_code.gsc:3438-3470): heli lands, the player boards by
 //    the trigger_use "heli_rescue_trigger" (targetname flag_set, script_flag player_gets_on_heli) or
@@ -57,8 +74,12 @@ main()
 	local_flag( "tv_movie" );
 
 	// scene gates that must start on both machines
-	shared_flag( "player_at_blackout_door" );
 	shared_flag( "player_gets_on_heli" );
+	level.coop_latch_ok = [];
+	level.coop_latched = [];
+	level.coop.handlers[ "latch" ] = ::blackout_ev_latch;
+	blackout_latch( "player_at_rappel" );
+	blackout_latch( "player_at_blackout_door" );
 
 	// volumes that only ever react to the local player
 	local_trigger( "trigger_fog" );
@@ -94,6 +115,55 @@ blackout_scenes()
 
 	// evac: both players are put on the same tag of the blackhawk
 	hide_between( "player_gets_on_heli", undefined );
+}
+
+// ---------------------------------------------------------------------------------------------
+// latched flag_set_touching gates: the first player to touch the volume sets the flag for everyone
+// and it then stays set on every machine. The trigger is local (no replay, no set/clear pulse).
+// ---------------------------------------------------------------------------------------------
+
+blackout_latch( flagName )
+{
+	level.coop_latch_ok[ flagName ] = true;
+	blackout_local_by_flag( "flag_set_touching", flagName );
+	level thread blackout_latch_proc( flagName );
+}
+
+blackout_latch_proc( flagName )
+{
+	blackout_wait_flag_init( flagName );
+	level thread blackout_latch_local( flagName );
+	if ( !isdefined( level.coop_latched[ flagName ] ) )
+		level waittill( "coop_latch_" + flagName );
+	for ( ;; )
+	{
+		if ( !flag( flagName ) )
+			flag_set( flagName );
+		flag_waitopen( flagName );
+	}
+}
+
+blackout_latch_local( flagName )
+{
+	flag_wait( flagName );
+	if ( isdefined( level.coop_latched[ flagName ] ) )
+		return;
+	level.coop_latched[ flagName ] = true;
+	maps\_coop::send( "latch|" + flagName );
+	maps\_coop::log( "latched " + flagName );
+	level notify( "coop_latch_" + flagName );
+}
+
+// "latch|<flag>" from a squadmate
+blackout_ev_latch( slot, tok )
+{
+	if ( tok.size < 3 )
+		return;
+	flagName = tok[ 2 ];
+	if ( !isdefined( level.coop_latch_ok[ flagName ] ) || isdefined( level.coop_latched[ flagName ] ) )
+		return;
+	level.coop_latched[ flagName ] = true;
+	level notify( "coop_latch_" + flagName );
 }
 
 blackout_wait_flag_init( flagName )

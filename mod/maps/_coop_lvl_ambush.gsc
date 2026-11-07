@@ -9,7 +9,8 @@
 //    "startnodeplayer_ambush" (1160-1162) -> puppets hidden from "takeover_fade" until
 //    "takeover_fade_done". Non-host players are nudged ~40 units aside right after that teleport
 //    (still frozen under the black overlay, takeover_fade 598-607; detected by standing on the
-//    node), so nobody gets yanked after controls came back.
+//    node). Note: takeover_fade 604-607 already gives controls back at "takeover_fade_clear", so
+//    the nudge lands ~0.1s after the teleport while the screen is still black / fading in.
 // 2. Early-fire gate (ambush_player_interrupt 690-711, set_flag_on_player_action 3610-3633,
 //    ambush_mission_fail 713-720): local player's weapon_fired/grenade sets "ambush_mission_fail"
 //    / "ambush_early_start" with flag_set -> replicated, so either player firing early fails or
@@ -40,7 +41,16 @@
 //    trigger flag and "force_suicide" a trigger -> replicated, both machines start the jump /
 //    slowmo together. A squadmate far away when the scene starts is pulled to the buddy (no
 //    playerlinkto in this scene, so the pull cannot fight a rig).
-// 8. Level end: flag_wait( "mission_done" ) -> nextmission (aarea_apartment_init 2342-2346),
+// 8. V. Zakhaev (ambush_badguy_spawn_function 766-797, badguy_spawn_function 3148-3166,
+//    badguy_died 3168-3180): every copy of him fails the mission on "death" unless the script sent
+//    "stop_death_fail" first. He leaves each scene by a scripted delete (797, 1854, 2253) or the
+//    scripted suicide (2880, 2962). The framework's AI-death sync would kill OUR copy as soon as
+//    the HOST's copy is deleted / commits suicide - i.e. before our own script sent
+//    "stop_death_fail" -> KILLED_TARGET mission fail for everyone. His spawners ("badguy",
+//    "badguy_village" noteworthies, "badguy_runby", "badguy_apartment" targetnames) are therefore
+//    taken out of remote-kill sync (no_remote_kill); each machine's script ends him itself. A player
+//    who shoots him still fails locally, and that fail is replicated.
+// 9. Level end: flag_wait( "mission_done" ) -> nextmission (aarea_apartment_init 2342-2346),
 //    host-driven by the framework.
 
 #include maps\_utility;
@@ -65,6 +75,32 @@ main()
 
 	// rooftop suicide scene
 	pull_to_buddy_on_flag( "apartment_suicide", 1500 );
+
+	// V. Zakhaev must never be killed by the AI-death sync (see 8.)
+	no_remote_kill( "badguy", "script_noteworthy" );
+	no_remote_kill( "badguy_village", "script_noteworthy" );
+	no_remote_kill( "badguy_runby", "targetname" );
+	no_remote_kill( "badguy_apartment", "targetname" );
+}
+
+no_remote_kill( value, key )
+{
+	ents = getentarray( value, key );
+	for ( i = 0; i < ents.size; i++ )
+	{
+		if ( isdefined( ents[ i ] ) && isdefined( ents[ i ].spawn_functions ) && !isalive( ents[ i ] ) )
+			ents[ i ] add_spawn_function( ::coop_unregister_ai );
+	}
+}
+
+// drop the guy from the AI-death map so a remote "K|" event finds nothing to kill
+coop_unregister_ai()
+{
+	self endon( "death" );
+	for ( i = 0; i < 10 && !isdefined( self.coop_id ); i++ )
+		wait 0.05;
+	if ( isdefined( self.coop_id ) && isdefined( level.coop ) && isdefined( level.coop.ai ) )
+		level.coop.ai[ self.coop_id ] = undefined;
 }
 
 // ambush_setup (1160-1162) puts every player on startnodeplayer_ambush while the screen is black

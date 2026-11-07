@@ -96,6 +96,10 @@ spread_spot( pos, n )
 		p = pos + offsets[ i ];
 		if ( !bullettracepassed( pos + ( 0, 0, 24 ), p + ( 0, 0, 24 ), false, undefined ) )
 			continue;
+		// player-hull check too, so the spread never puts the (frozen) player inside a wall
+		hull = playerphysicstrace( pos + ( 0, 0, 8 ), p + ( 0, 0, 8 ) );
+		if ( distance( hull, p + ( 0, 0, 8 ) ) > 2 )
+			continue;
 		tr = bullettrace( p + ( 0, 0, 24 ), p - ( 0, 0, 64 ), false, undefined );
 		if ( tr[ "fraction" ] < 1 )
 			return tr[ "position" ];

@@ -17,6 +17,15 @@
 //    clacker_notouch -> clacker_disable runs takeweapon("c4") on him (2760-2840) -> LOCAL triggers.
 //    The per-trigger availability flags (script_flag_true clacker_*_available, set/cleared 2694/2779)
 //    and got_the_clacker (2763/2791/2828) toggle per sim -> LOCAL. The *_exploded story flags replicate.
+//    Reviewer (soft-lock): each sim counts its own clackers (level.objectiveClackers, 2643) and only
+//    the sim whose count reaches 0 sets fall_back_to_barn / barn_assault_begins and starts
+//    tavern_storming_delay (2938-2947); nothing else sets them outside start points (615-731). With
+//    per-player clackers, players who split the four detonators never reach 0 in either sim and the
+//    level stalls. clacker_remote_sync(): when a *_exploded flag arrives for a detonator that is still
+//    armed in this sim, consume it here exactly like clacker_fire (2853-2947): drop it from the
+//    player's hands if he holds it, play the killzone fx, kill this sim's axis AI in the killzone
+//    (no attacker, so they are not reported as our kills; the remote sim reports its own), delete the
+//    use trigger / volume / objective marker, refresh objective 5 and count down.
 //  * Tanks: "tank_killzone_east/west" triggers make the tank aim at level.player (3090-3133) -> LOCAL
 //    triggers, so a tank only fires at the player that actually stands in its killzone.
 //  * Javelin (3051-3062): a weapon entity, picked up per player. Native.
@@ -63,6 +72,7 @@ main()
 	local_trigger( "tank_killzone_west" );
 
 	level thread delayed_setup();
+	level thread clacker_remote_sync();
 }
 
 // village_defend flag_init()s its flags after _load::main (village_defend.gsc:148-236), i.e. after our
@@ -73,4 +83,156 @@ delayed_setup()
 	// both players ride the seaknight on rigs at the same tag
 	if ( isdefined( level.flag[ "player_made_it" ] ) )
 		hide_between( "player_made_it", undefined );
+}
+
+// ---------------------------------------------------------------------------------------------
+// detonators used on the other machine (see header)
+// ---------------------------------------------------------------------------------------------
+
+clacker_remote_sync()
+{
+	waittillframeend; // flags are inited after _load::main
+	trigs = getentarray( "detonator_usetrig", "targetname" );
+	for ( i = 0; i < trigs.size; i++ )
+	{
+		trig = trigs[ i ];
+		if ( !isdefined( trig.target ) )
+			continue;
+		dets = getentarray( trig.target, "targetname" );
+		for ( j = 0; j < dets.size; j++ )
+		{
+			det = dets[ j ];
+			if ( !isdefined( det.script_namenumber ) || det.script_namenumber != "objective_clacker" )
+				continue;
+			if ( !isdefined( det.script_noteworthy ) )
+				continue;
+			f = clacker_exploded_flag( det.script_noteworthy );
+			if ( !isdefined( f ) || !isdefined( level.flag[ f ] ) )
+				continue;
+			det thread clacker_remote_use( trig, f );
+		}
+	}
+}
+
+// clacker_fire, village_defend.gsc:2865-2879
+clacker_exploded_flag( noteworthy )
+{
+	if ( noteworthy == "detonator_nearslope" )
+		return "nearslope_exploded";
+	if ( noteworthy == "detonator_farslope" )
+		return "farslope_exploded";
+	if ( noteworthy == "detonator_crashsite" )
+		return "crashsite_exploded";
+	if ( noteworthy == "detonator_cliffside" )
+		return "cliffside_exploded";
+	return undefined;
+}
+
+clacker_remote_use( trig, f )
+{
+	self endon( "death" );
+	flag_wait( f );
+	waittillframeend; // a local clacker_fire deletes its trigger in the frame it sets the flag
+	if ( !isdefined( trig ) || !isdefined( self ) )
+		return; // used on this machine
+	if ( !isdefined( level.objectiveClackers ) )
+		return;
+	maps\_coop::log( "village_defend: remote detonation " + f );
+
+	useVolume = getent( self.script_noteworthy, "targetname" );
+	if ( isdefined( useVolume ) && flag( "got_the_clacker" ) && level.player istouching( useVolume ) )
+	{
+		// we are holding this very detonator: put it away like clacker_disable (2826-2850)
+		level notify( "detclacker_disarm" );
+		flag_clear( "got_the_clacker" );
+		level.player takeweapon( "c4" );
+		prim = level.player getweaponslistprimaries();
+		if ( prim.size )
+			level.player switchtoweapon( prim[ 0 ] );
+	}
+	self hide();
+
+	markers = [];
+	if ( isdefined( self.target ) )
+	{
+		m = getent( self.target, "targetname" );
+		while ( isdefined( m ) && markers.size < 64 )
+		{
+			markers[ markers.size ] = m;
+			if ( !isdefined( m.target ) )
+				break;
+			m = getent( m.target, "targetname" );
+		}
+	}
+	level thread clacker_remote_killzone( markers );
+
+	// objective marker of this trigger (clacker_fire 2891-2903)
+	used = undefined;
+	targs = getentarray( trig.target, "targetname" );
+	for ( i = 0; i < targs.size; i++ )
+	{
+		if ( isdefined( targs[ i ].script_noteworthy ) && targs[ i ].script_noteworthy == "clacker_objective_marker" )
+			used = targs[ i ];
+	}
+
+	if ( isdefined( useVolume ) )
+		useVolume delete();
+	trig delete();
+	if ( isdefined( used ) )
+		used delete();
+
+	// reprint objective 5 with the remaining detonators (clacker_fire 2905-2932), only while this sim's
+	// objectives() thread has it up (added at 3508 after objective_detonators, done at 3524)
+	if ( flag( "objective_detonators" ) && !flag( "objective_armor_arrival" ) )
+	{
+		objective_delete( 5 );
+		objective_add( 5, "active", &"VILLAGE_DEFEND_USE_THE_DETONATORS_IN1" );
+		objective_current( 5 );
+		left = getentarray( "clacker_objective_marker", "script_noteworthy" );
+		for ( i = 0; i < left.size; i++ )
+		{
+			if ( isdefined( left[ i ] ) )
+				objective_additionalposition( 5, i, left[ i ].origin );
+		}
+	}
+
+	level.objectiveClackers--;
+	if ( level.objectiveClackers > 0 )
+		return;
+	if ( !flag( "fall_back_to_barn" ) )
+		flag_set( "fall_back_to_barn" );
+	if ( isdefined( level.flag[ "barn_assault_begins" ] ) && !flag( "barn_assault_begins" ) )
+		flag_set( "barn_assault_begins" ); // inited by _load from the barn_helidrop script_flag_true
+	autosave_by_name( "clackers_all_used_up" );
+	level thread maps\village_defend::tavern_storming_delay();
+}
+
+// killzone_detonation (4072-4099) without radiusdamage, so the local player standing in the partner's
+// killzone is not hurt by a blast that never hit him on the partner's machine
+clacker_remote_killzone( squibs )
+{
+	n = 0;
+	for ( i = 0; i < squibs.size; i++ )
+	{
+		squib = squibs[ i ];
+		if ( !isdefined( squib ) )
+			continue;
+		if ( isdefined( level.killZoneFxProgram ) && level.killZoneFxProgram.size )
+		{
+			if ( n >= level.killZoneFxProgram.size )
+				n = 0;
+			if ( isdefined( level.killZoneFxProgram[ n ] ) )
+				playfx( level.killZoneFxProgram[ n ], squib.origin );
+		}
+		if ( isdefined( level.killZoneSfx ) && isdefined( level.killZoneSfx[ n ] ) )
+			squib playsound( level.killZoneSfx[ n ] );
+		ai = getaiarray( "axis" );
+		for ( k = 0; k < ai.size; k++ )
+		{
+			if ( isalive( ai[ k ] ) && distance( ai[ k ].origin, squib.origin ) < 240 )
+				ai[ k ] dodamage( ai[ k ].health + 100500, squib.origin );
+		}
+		n++;
+		wait randomfloatrange( 0.05, 0.15 );
+	}
 }

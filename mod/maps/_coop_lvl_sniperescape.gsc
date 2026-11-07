@@ -18,6 +18,11 @@
 //  * Rappel (sniperescape.gsc:796-861): "rappel_trigger" trigger_use is replicated, so both players
 //    rappel at once on their own rigs at the same node -> puppets hidden from player_rappels (local)
 //    until heli_moves_on (vehicle flag, set 1.5 s after the unlink) or a timeout.
+//    Reviewer: the rappel sets apartment_explosion 1.2 s later (844; replicated), which runs
+//    blow_up_hotel and its explosion_death_trigger chain on everyone (274-276, exchange.gsc:2178-2210).
+//    If the partner's replay of rappel_trigger was lost (his player_rappel() was not waiting yet) he
+//    would die in the hotel -> rappel_straggler(): on apartment_explosion, a player who has not
+//    rappelled yet and whose rappel_trigger is still armed is sent down the rope (lerp from anywhere).
 //  * Heat area: kill heli summoned by camping in a zone, tracked through "heat_progression" triggers
 //    (sniperescape_code.gsc:5567-5600) -> LOCAL triggers, each sim punishes its own player.
 //  * Carrying Macmillan (sniperescape_code.gsc:2045-2160, 2320-2440, 2804-2880): pickup is
@@ -37,6 +42,15 @@
 //    resulting put_price_near_wheel / price_is_put_down_near_wheel / beacon_placed / fair_hold_fire.
 //    The flag_set_touching volumes (player_goes_to_pool, player_abandon_protection, player_plays_nice,
 //    cant_pick_up_price, near_window) describe only the local player -> LOCAL triggers.
+//    Reviewer: a local trigger alone does not stop the *flag* from replicating: flag_set_touching sets
+//    on enter and clears on exit (_load.gsc:2856-2873), but only sets travel (clears are host-only), so
+//    a client's near_window / cant_pick_up_price would stay set forever on the host. near_window drives
+//    the window vision/glow blend loop (sniperescape.gsc:486-505) -> local_flag. cant_pick_up_price is
+//    only heli radio chatter (anim.gsc:632) -> local_flag for the same reason. The player_* ones are
+//    already local by name.
+//    price_can_be_left (set by this sim's put-down at 1734, read only by the leash
+//    price_dies_if_player_goes_too_far, code 2330-2335) is Macmillan state too -> local_flag; replicated,
+//    the first player to put his Price down would switch off the partner's leash.
 //  * Seaknight (sniperescape.gsc:1878-1997, wounding.gsc:319-410): each sim lands, waits 60 s, and
 //    leaves; the player boards by distance to tag_door_rear and is linked to a rig at tag_detach.
 //    seaknight_* timeline flags are per sim (a replicated seaknight_leaves would refuse the late
@@ -62,6 +76,11 @@ main()
 	local_flag( "price_is_put_down_near_wheel" );
 	local_flag( "beacon_placed" );
 	local_flag( "fair_hold_fire" );
+	local_flag( "price_can_be_left" );
+
+	// flag_set_touching volumes describing the local player whose names are not player_*
+	local_flag( "near_window" );
+	local_flag( "cant_pick_up_price" );
 
 	// seaknight timeline is per sim
 	local_flag( "seaknight_flies_in" );
@@ -102,6 +121,8 @@ delayed_setup()
 	waittillframeend;
 	if ( isdefined( level.flag[ "player_rappels" ] ) )
 		level thread rappel_hide();
+	if ( isdefined( level.flag[ "apartment_explosion" ] ) && isdefined( level.flag[ "player_rappels" ] ) )
+		level thread rappel_straggler();
 	if ( isdefined( level.flag[ "player_made_it_to_seaknight" ] ) )
 		hide_between( "player_made_it_to_seaknight", undefined );
 }
@@ -148,4 +169,20 @@ rappel_hide()
 	else
 		wait 10;
 	level.coop.hide_count--;
+}
+
+// partner rappelled (apartment_explosion replicated) but our rappel_trigger never saw the replayed hit
+rappel_straggler()
+{
+	flag_wait( "apartment_explosion" );
+	if ( !maps\_coop::in_coop() )
+		return;
+	waittillframeend;
+	if ( flag( "player_rappels" ) )
+		return;
+	trig = getent( "rappel_trigger", "targetname" );
+	if ( !isdefined( trig ) )
+		return; // deleted: already used, or player_rappel() not reached in this sim
+	maps\_coop::log( "sniperescape: forcing straggler rappel" );
+	trig notify( "trigger", level.player );
 }

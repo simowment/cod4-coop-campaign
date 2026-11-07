@@ -36,7 +36,10 @@
 //    "pilot_taken_from_cockpit" itself IS replicated. -> pilot_pickup_pull(): when it arrives and the
 //    local pilot is still useable, notify the local pilot "trigger" so this player also does the
 //    pull-out (pulls a straggler to the crash site; every Jackson carries his own copy of the
-//    pilot). Puppets hidden for the length of the rig anim (both players on the same crashnode).
+//    pilot). Retried for up to 90 s (the rescue timer), skipped while downed; the local
+//    "player_near_crash_site" gate (:2794) is set on this copy if its trigger hit was missed.
+//    Puppets hidden for the length of the rig anim (both players on the same crashnode), only
+//    once this copy actually picked her up.
 //    "player_near_cobra" flag_set_touching (pilot waves while YOU are near) -> local_trigger.
 //  * Putdown in the seaknight / nuke (nuke_flight :2954-3075): trig_pilot_putdown (trigger_radius)
 //    is replicated, so the first player in starts every copy's "wounded_putdown" rig (each player
@@ -134,6 +137,11 @@ lz_mount_fallback()
 	end = gettime() + 20000;
 	while ( isdefined( level.onMark19 ) && !level.onMark19 && gettime() < end )
 	{
+		if ( is_down() )
+		{
+			wait 0.5;
+			continue;
+		}
 		local_notify_trigger( getent( "trigger_seaknight", "targetname" ) );
 		wait 0.1;
 		local_notify_trigger( getent( "trigger_seaknight_gun", "targetname" ) );
@@ -151,11 +159,19 @@ pilot_pickup_pull()
 {
 	wait_flag_init( "pilot_taken_from_cockpit" );
 	flag_wait( "pilot_taken_from_cockpit" );
-	if ( !isdefined( level.cobrapilot ) )
-		return; // nuke start point sets the flag without a pilot (airlift.gsc:352)
 
+	// the pilot is spawned per copy at the crash (cobrapilot_spawn :2523-2531); a lagging copy may not
+	// have her yet. The nuke start point sets the flag without ever spawning one (airlift.gsc:352).
+	wait_end = gettime() + 10000;
+	while ( !isdefined( level.cobrapilot ) && gettime() < wait_end )
+		wait 0.25;
+	if ( !isdefined( level.cobrapilot ) )
+		return;
+
+	// keep trying for as long as the 90 s rescue timer (:2602) could still run; a downed player is
+	// skipped until he is back up
 	pulled = false;
-	end = gettime() + 10000;
+	end = gettime() + 90000;
 	while ( gettime() < end )
 	{
 		if ( !isdefined( level.cobrapilot ) || !isalive( level.cobrapilot ) )
@@ -164,9 +180,18 @@ pilot_pickup_pull()
 			break; // our own player has picked her up (cobrapilot_think :2810)
 		if ( !maps\_coop::in_coop() )
 			return;
-		if ( isdefined( level.flag[ "player_near_crash_site" ] ) && flag( "player_near_crash_site" ) )
+		if ( !is_down() )
 		{
-			if ( !isdefined( level.coop.down ) || !level.coop.down )
+			// cobrapilot_think only listens for the use after flag_wait( "player_near_crash_site" )
+			// (:2794); that flag is player-local and normally arrives through the replicated
+			// flag_set trigger hit - set it on this copy if that hit was missed (only dialogue and
+			// the pilot's wave also wait on it, :2496)
+			if ( !flag( "player_near_crash_site" ) )
+			{
+				flag_set( "player_near_crash_site" );
+				wait 0.1;
+			}
+			if ( isdefined( level.cobrapilot ) && isalive( level.cobrapilot ) && isdefined( level.cobrapilot.useable ) && level.cobrapilot.useable )
 			{
 				level.cobrapilot notify( "trigger", level.player );
 				pulled = true;
@@ -174,6 +199,8 @@ pilot_pickup_pull()
 		}
 		wait 0.5;
 	}
+	if ( isdefined( level.cobrapilot ) && isdefined( level.cobrapilot.useable ) && level.cobrapilot.useable )
+		return; // never picked up on this copy: no rig to hide for
 	if ( pulled )
 		maps\_coop::log( "airlift: joined the pilot pull-out" );
 
@@ -184,6 +211,11 @@ pilot_pickup_pull()
 	hide_for( t );
 }
 
+is_down()
+{
+	return isdefined( level.coop.down ) && level.coop.down;
+}
+
 putdown_fallback()
 {
 	wait_flag_init( "nuke_section_start" );
@@ -192,10 +224,12 @@ putdown_fallback()
 	if ( !maps\_coop::in_coop() )
 		return;
 	wait 1.5;
-	end = gettime() + 30000;
+	// 90 s: covers a copy whose own pull-out only starts late (pilot_pickup_pull) plus the ~9 s rig
+	end = gettime() + 90000;
 	while ( !flag( "player_putting_down_pilot" ) && gettime() < end )
 	{
-		local_notify_trigger( getent( "trig_pilot_putdown", "targetname" ) );
+		if ( !is_down() )
+			local_notify_trigger( getent( "trig_pilot_putdown", "targetname" ) );
 		wait 1;
 	}
 }

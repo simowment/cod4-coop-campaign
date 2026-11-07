@@ -23,7 +23,9 @@
 //    level endon of that wait loop (code:2308) - replicating it would kill the other copy's scene.
 //    -> local_flag("alasad_sequence_started"); when a copy starts the scene (level notify at
 //       code:2357) it sets shared flag "coop_alasad_go"; a copy that has not started 1.5 s later
-//       pulls its player into the start trigger (facing Price), which starts its own scene natively.
+//       pulls its player into the start trigger (facing Price), which starts its own scene natively;
+//       if the player is then inside the "alasad_*_area" but not the start trigger, the start
+//       trigger is notified on that copy only (downed players are skipped until revived).
 //  * Interrogation A (code:2355-2425): removeWeaponFromPlayer, Price waittill_player_lookat(cos 60)
 //    (code:2402, per player), anim_single "interrogationA", goBlack -> native per copy.
 //  * Interrogation B (code:2427-2468): freezeControls, takeAllWeapons, movePlayerToLocation(
@@ -159,6 +161,11 @@ pull_into_scene()
 	{
 		if ( isdefined( level.coop_va_scene ) )
 			return; // our own copy is running the scene
+		if ( isdefined( level.coop.down ) && level.coop.down )
+		{
+			wait 3;
+			continue; // downed: let the revive happen first
+		}
 		trig = scene_trigger();
 		if ( isdefined( trig ) && !( level.player istouching( trig ) ) )
 		{
@@ -169,8 +176,30 @@ pull_into_scene()
 				level.player setplayerangles( ( 0, ang[ 1 ], 0 ) );
 			}
 		}
-		wait 3;
+		// alasad_sequence_wait polls the area every frame and then threads alasad_sequence_ready,
+		// which waits for the start trigger (code:2318-2348). safe_spot_near() may drop us just
+		// outside the start trigger (or the house brush origin may not be inside its brush), so
+		// once we are inside the area fire the start trigger on this copy only.
+		wait 0.5;
+		area = scene_area();
+		if ( !isdefined( level.coop_va_scene ) && isdefined( trig ) && isdefined( area ) && level.player istouching( area ) )
+		{
+			trig.coop_remote_time = gettime(); // keep _coop.gsc watch_trigger from re-broadcasting
+			trig notify( "trigger", level.player );
+		}
+		wait 2.5;
 	}
+}
+
+scene_area()
+{
+	if ( !isdefined( level.alasad_objective_location ) )
+		return undefined;
+	if ( level.alasad_objective_location == "6" )
+		return getent( "alasad_barn_area", "targetname" );
+	if ( level.alasad_objective_location == "2" )
+		return getent( "alasad_house_area", "targetname" );
+	return undefined;
 }
 
 scene_trigger()

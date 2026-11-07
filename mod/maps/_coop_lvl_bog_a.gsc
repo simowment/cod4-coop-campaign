@@ -42,9 +42,15 @@
 //    the other player); when zpus_destroyed arrives without a local detonation, the local zpu gets
 //    "clear_c4" (removes our own unplanted/planted C4 and detonator) and "death", and the same
 //    visuals are applied, without the radiusDamage (the squadmate's blast must not hurt us).
+//    Skipped on the "cobras"/"end" start points, which set zpus_destroyed themselves
+//    (bog_a_backhalf.gsc:224) without a C4 detonation.
 //
 //  * IR beacon (bog_a_backhalf.gsc:769-793): trigger_use "beaconTrig" -> beacon_planted. Replicated
-//    on purpose, the cobra strike runs on both machines. -> nothing.
+//    on purpose, the cobra strike runs on both machines. But cobra_sequence only reaches its
+//    "beaconTrig waittill trigger" after a 4s wait plus a radio line, so a replayed use that arrives
+//    earlier is lost and that machine's cobras would wait for its own player to plant a second
+//    beacon. -> when beacon_planted arrives, the local beaconTrig is re-notified every 0.5s until
+//    cobra_sequence consumes (deletes) it.
 //
 //  * Ending (bog_a_backhalf.gsc:1464-1534 ending_sequence): the tank talk waits on
 //    "distance( level.player.origin, org.origin ) > 220" (non-replicated) before setting
@@ -88,6 +94,7 @@ main()
 		level thread bog_a_watch_bmp( i );
 
 	level thread bog_a_zpu_sync();
+	level thread bog_a_beacon_sync();
 	level thread bog_a_ending_pull();
 }
 
@@ -184,6 +191,8 @@ bog_a_zpu_sync()
 	flag_wait( "zpus_destroyed" );
 	if ( !isdefined( zpu ) )
 		return;
+	if ( isdefined( level.start_point ) && ( level.start_point == "cobras" || level.start_point == "end" ) )
+		return; // the start point set the flag, no squadmate blew anything up
 	zpu notify( "clear_c4" );
 	zpu notify( "death" );
 	if ( isdefined( level.tankExplosion_fx ) )
@@ -193,6 +202,26 @@ bog_a_zpu_sync()
 	if ( isdefined( level.abrams ) )
 		maps\bog_a_backhalf::abrams_gets_drawing();
 	maps\_coop::log( "zpu destroyed by squadmate" );
+}
+
+// ---------------------------------------------------------------------------------------------
+// IR beacon planted by a squadmate (bog_a_backhalf.gsc:784-793)
+// ---------------------------------------------------------------------------------------------
+
+bog_a_beacon_sync()
+{
+	trig = getent( "beaconTrig", "targetname" );
+	if ( !isdefined( trig ) )
+		return;
+	bog_a_wait_flag_init( "beacon_planted" );
+	flag_wait( "beacon_planted" );
+	// our own cobra_sequence deletes the trigger as soon as it has taken the use
+	while ( isdefined( trig ) )
+	{
+		trig.coop_remote_time = gettime(); // _coop watch_trigger: do not echo this back as our hit
+		trig notify( "trigger", level.player );
+		wait 0.5;
+	}
 }
 
 // ---------------------------------------------------------------------------------------------

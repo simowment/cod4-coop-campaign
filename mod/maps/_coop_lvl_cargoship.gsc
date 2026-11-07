@@ -79,6 +79,15 @@ main()
 	level thread catwalk_straggler();
 
 	// --- ending: one jump rescues the squad, each player plays their own rig ---
+	// "end_start_player_anim" contains "player_", so is_local_flag() would keep it local by default:
+	// share it explicitly, or the straggler's copy never sees the jump and its own end_anim_thread times
+	// out into end_seaknight_leaving -> escape_mission_failed (cargoship.gsc:3721-3731) = squad fail.
+	shared_flag( "end_start_player_anim" );
+	// end_seaknight_leaving is set by a copy whose 3s jump window ran out (cargoship.gsc:3730); shared it
+	// would kill end_jump on the other copies (endon, cargoship.gsc:3798) while their window is still
+	// open. Local: a late copy still recovers when the squadmate's jump flag arrives within the 5s
+	// before escape_mission_failed (which returns once end_start_player_anim is set, cargoship_code:4131).
+	local_flag( "end_seaknight_leaving" );
 	local_flag( "end_linked_player_to_rig" );
 	local_flag( "gotcha" );
 	local_flag( "end_finished" );
@@ -112,9 +121,17 @@ end_straggler()
 	if ( distance( level.player.origin, price.origin ) <= 490 )
 		return; // end_main rigs us itself
 	jump = getent( "escape_player_jump", "targetname" );
-	if ( !isdefined( jump ) )
+	if ( isdefined( jump ) )
+		pull_to( jump.origin, "Regrouping with your squad" );
+	// On this copy Price may not be at the Sea Knight yet: the heroes pace themselves on the local player
+	// (escape_heroes_holdtheline) and only run to the rescue node after this very gate
+	// (cargoship.gsc:3595-3597). If the jump spot is still > 490 from our Price, move next to him.
+	wait 0.5;
+	if ( flag( "end_linked_player_to_rig" ) || !isdefined( price ) )
 		return;
-	pull_to( jump.origin, "Regrouping with your squad" );
+	if ( distance( level.player.origin, price.origin ) <= 490 )
+		return;
+	pull_to( price.origin, "Regrouping with your squad" );
 }
 
 unlink_hide()

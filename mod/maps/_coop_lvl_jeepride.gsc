@@ -122,7 +122,9 @@ jr_spread_from_squad( timeoutSec )
 		return;
 	if ( jr_flag_is_set( "bridge_zakhaev_setup" ) )
 		return;
-	right = anglestoright( level.player getplayerangles() );
+	// yaw only: the shellshocked view can be pitched/rolled, which would tilt the step
+	ang = level.player getplayerangles();
+	right = anglestoright( ( 0, ang[ 1 ], 0 ) );
 	side = 1;
 	if ( c.slot % 2 == 0 )
 		side = -1;

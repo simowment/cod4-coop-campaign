@@ -26,6 +26,15 @@
 //    per-player -> native, nothing to do.
 // 9. fog_adjust (258-273): trigger_multiple "fog_in" / "fog_out" change the fog for the local
 //    player's position -> local_trigger() so a squadmate's hit does not change our fog.
+// 10. Vehicle handshake flags (added in review): "truck_crush_tank_in_position" (494, set when
+//    THIS copy's Abrams reaches truck_crush_node), "allowTankFire" (886 set after the turret dialog,
+//    764-767 waited then cleared by shoot_exploder: a ping-pong handshake - a squadmate's set would
+//    fire our tank early and the host's replicated clear could eat our own set and stall the
+//    exploder loop), "tank_in_final_position" (1409), "t72_in_final_position" (1664) and
+//    "tank_turret_aimed_at_t72" (1419) all describe this machine's own vehicles. Replicated they
+//    would start the tank crush / T72 shot before the local tank is in place -> local_flag().
+//    Story flags around them (truck_crush_player_in_position, abrams_move_shoot_t72,
+//    friendly_reactions_over, abrams_advance_to_end_level) stay replicated.
 // 8. End: seaknight() 1968-2012 waits on trigger "player_in_seaknight" (replicated) and
 //    "seaknight_dialog_done", then nextmission() -> level end is host-driven by the framework.
 
@@ -39,6 +48,14 @@ main()
 	shared_flag( "player_passed_dumpster" );
 
 	local_trigger( "t72_kill_player_trigger" );
+
+	// per-copy tank / turret handshakes: each machine drives its own Abrams and T72, so these
+	// must follow this machine's vehicles, not the squadmate's (see header note 10)
+	local_flag( "truck_crush_tank_in_position" ); // bog_b.gsc:494, waited 1820
+	local_flag( "allowTankFire" );                // set 886 / waited+cleared 764-767
+	local_flag( "tank_in_final_position" );       // 1409, waited 1262 / 1415
+	local_flag( "t72_in_final_position" );        // 1664, waited 1414
+	local_flag( "tank_turret_aimed_at_t72" );     // 1419, waited 1263
 
 	// fog_adjust (bog_b.gsc:258-273): setExpFog on fog_in / fog_out hits is the local player's view
 	local_trigger( "fog_in" );

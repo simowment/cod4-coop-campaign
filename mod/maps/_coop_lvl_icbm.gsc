@@ -31,6 +31,11 @@
 //    and our tower has not detonated, we clear our charges ("clear_c4": deletes the models and
 //    removes the detonator, _c4.gsc:165-179) and send the tower its "c4_detonation" ourselves.
 //    The collapse itself (icbm_code.gsc:1488-1497) is flag-gated -> already runs everywhere.
+//    If a plant replay was lost here, flyover_to_tower_handler would still sit in
+//    level waittill( "c4_in_place" ) (873/879), so "c4_planted", c4_set() and with it
+//    fense_to_base_handler() (957) would never run on this machine: before clearing, the missing
+//    "c4_in_place" notifies are sent (counted locally; sent BEFORE "clear_c4" because
+//    remove_detonator, _c4.gsc:182, ends on "c4_in_place").
 // 6. Base fights / launch (meet_second_squad_handler 1240-1283, missile_launch 1326-1358):
 //    "lift_off" is a flag_set trigger (player in position) -> replicated. A squadmate far away
 //    when the launch scene is triggered is pulled to the buddy.
@@ -100,6 +105,8 @@ tower_c4_sync()
 	if ( !isdefined( tower ) )
 		return;
 	tower thread mark_detonated();
+	level.coop_icbm_plants = 0;
+	level thread count_plants();
 
 	flag_wait( "tower_destroyed" );
 	waittillframeend;
@@ -108,6 +115,19 @@ tower_c4_sync()
 	if ( !isdefined( tower ) || isdefined( tower.coop_detonated ) )
 		return;
 	maps\_coop::log( "icbm: tower blown by squadmate, clearing local charges" );
+	// flyover_to_tower_handler sets multiple_c4 (861) right before it starts waiting for plants
+	if ( isdefined( tower.multiple_c4 ) )
+	{
+		missing = 2 - level.coop_icbm_plants;
+		for ( i = 0; i < missing; i++ )
+		{
+			maps\_coop::log( "icbm: plant replay missing, sending c4_in_place" );
+			level notify( "c4_in_place", level.player ); // an entity, so "ent1 == planted_ent" (874) is valid
+			wait 0.05;
+		}
+	}
+	if ( !isdefined( tower ) || isdefined( tower.coop_detonated ) )
+		return;
 	tower notify( "clear_c4" );
 	wait 0.05;
 	if ( isdefined( tower ) && !isdefined( tower.coop_detonated ) )
@@ -119,4 +139,13 @@ mark_detonated()
 	self endon( "death" );
 	self waittill( "c4_detonation" );
 	self.coop_detonated = true;
+}
+
+count_plants()
+{
+	for ( ;; )
+	{
+		level waittill( "c4_in_place" );
+		level.coop_icbm_plants++;
+	}
 }

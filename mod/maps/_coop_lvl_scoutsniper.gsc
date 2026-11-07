@@ -24,8 +24,13 @@
 //    Left native: each Price waits for his own player; church_door_open replicates harmlessly.
 //    Graveyard hind (1795-1890) hunts level.player natively per sim (uses istouching, no triggers).
 //  * Field: price_left_behind fail if the player is >3500 from Price while spotted when field_spawn is
-//    hit (1975-1982). field_spawn is a replicated flag_set trigger, so a lagging partner could fail the
-//    whole squad -> pull_to_buddy_on_flag( "field_spawn", 3000 ).
+//    hit (1975-1982). field_spawn is a replicated flag_set trigger (radius 2773, zone), so a lagging
+//    partner could fail the whole squad. The check is against *this sim's* Price and only applies while
+//    _stealth_spotted, so field_pull() moves the local player next to his own Price only in exactly that
+//    case (reviewer: replaced an unconditional pull_to_buddy_on_flag( "field_spawn", 3000 ), which
+//    teleported a sneaking player through the field patrols even when no fail was pending and measured
+//    against the partner instead of the Price the fail tests). Ordering vs field_endmission's own
+//    flag_wait on the same notify is not guaranteed; ours is registered first (frame 1).
 //  * Cargo patrol position flags cargo_patrol_away/_danger/_kill, cargo_defender1_away/2_away are set and
 //    cleared by script_origins along each sim's own patrol path (scoutsniper_code.gsc:1928-1966, ents
 //    cargo_patrol_flag_set/clear) -> LOCAL.
@@ -80,5 +85,20 @@ delayed_setup()
 	waittillframeend;
 	// the field entry fails the mission for a player far from Price while spotted
 	if ( isdefined( level.flag[ "field_spawn" ] ) )
-		pull_to_buddy_on_flag( "field_spawn", 3000 );
+		level thread field_pull();
+}
+
+// field_endmission (scoutsniper.gsc:1979-1981): spotted && distance( player, price ) > 3500 -> fail
+field_pull()
+{
+	flag_wait( "field_spawn" );
+	if ( !maps\_coop::in_coop() )
+		return;
+	if ( !flag( "_stealth_spotted" ) )
+		return;
+	if ( !isdefined( level.price ) || !isalive( level.price ) || !isalive( level.player ) )
+		return;
+	if ( distance( level.player.origin, level.price.origin ) <= 3000 )
+		return;
+	pull_to( level.price.origin, "Regrouping with Captain MacMillan" );
 }

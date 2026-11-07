@@ -12,8 +12,13 @@
 // 2. BMPs bmp_02/03/04 (vehicle_bmp_think 3314-3352, vehicle_death_think 3380-3431,
 //    vehicle_c4_think 3664-3697): only the local player's damage counts and vehicle deaths are
 //    not replicated; "<bmp>_destroyed" is (flag_set at 3346). When the flag arrives and our copy
-//    of the BMP is still alive, we kill it with the stock vehicle_death() (same call the squad
-//    uses in squad_bmp_destroy 3103), which also clears its C4.
+//    of the BMP is still alive, we kill it the way the stock vehicle_death() (3699-3727) does:
+//    "clear_c4" (removes its C4 models / our detonator), earthquake, notify "death", explosion
+//    sound. The stock function is NOT called: a maps\launchfacility_a:: reference in this module
+//    would make every other level fail to load (the module is linked on every map through
+//    _coop_levels.gsc, and maps/launchfacility_a.gsc only exists in this level's fastfile). Its
+//    radiusdamage / token player damage are left out on purpose (the BMP was killed elsewhere;
+//    the AIs it would hurt are synced by the AI-death replication).
 //    "player_near_bmp_02" etc. are flag_set_touching triggers about the local player -> local.
 // 3. Gate (gate_player_participation 1212-1256, gate_right_reach 1258-1271, gate_sequence
 //    1276-1289): progression needs "player_reached_kill_max" (local player's kill counter
@@ -155,7 +160,17 @@ bmp_sync( name )
 	if ( !isdefined( bmp ) || isdefined( bmp.coop_dead ) )
 		return;
 	maps\_coop::log( "launchfacility_a: " + name + " destroyed by squadmate, killing local copy" );
-	bmp thread maps\launchfacility_a::vehicle_death( bmp getentitynumber() );
+	bmp thread remote_bmp_death();
+}
+
+// local copy of the parts of launchfacility_a::vehicle_death (3699-3727) that end the BMP
+remote_bmp_death()
+{
+	self notify( "clear_c4" );
+	org = self.origin;
+	earthquake( 0.6, 2, org, 2000 );
+	self notify( "death" );
+	thread play_sound_in_space( "exp_armor_vehicle", org );
 }
 
 mark_dead()

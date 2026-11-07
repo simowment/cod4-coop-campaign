@@ -127,6 +127,11 @@ lfb_remote_wall_blow()
 		thread play_sound_in_space( "detpack_explo_metal", explosives.origin );
 		earthquake( 0.4, 1, explosives.origin, 1000 );
 	}
+	// blow_the_wall's aa_ (stat / auto-adjust section) flags are local: mirror them too
+	if ( isdefined( level.flag[ "aa_blow_the_wall" ] ) )
+		flag_clear( "aa_blow_the_wall" );
+	if ( isdefined( level.flag[ "aa_upload_them_codes" ] ) )
+		flag_set( "aa_upload_them_codes" );
 
 	wait 1;
 	trig = getent( "breaching_control_room", "targetname" );
@@ -159,6 +164,11 @@ lfb_codes_uploaded_cleanup()
 	flag_wait( "codes_uploaded" );
 	// upload_codes() on this copy may still be waiting for its aigroup and then trigger_on() the
 	// keypad and spawn the _obj model later (1726-1737). Keep it retired until the level is over.
+	// The uploader's copy clears these local aa_ section flags (1800-1801); do the same here.
+	if ( flag( "aa_countdown_started" ) )
+		flag_clear( "aa_countdown_started" );
+	if ( flag( "aa_upload_them_codes" ) )
+		flag_clear( "aa_upload_them_codes" );
 	while ( !flag( "at_the_jeep" ) )
 	{
 		trig = getent( "keyboard_use_trigger", "targetname" );
