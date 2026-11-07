@@ -1,0 +1,5 @@
+build/
+*.zone
+__pycache__/
+native/build/
+*.log
