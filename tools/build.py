@@ -75,8 +75,11 @@ def main():
 
     dll = os.path.join(ROOT, 'native', 'build', 'd3d9.dll')
     if os.path.isfile(dll):
-        shutil.copyfile(dll, os.path.join(a.game, 'd3d9.dll'))
-        print('installed d3d9.dll proxy')
+        try:
+            shutil.copyfile(dll, os.path.join(a.game, 'd3d9.dll'))
+            print('installed d3d9.dll proxy')
+        except PermissionError:
+            print('WARNING: d3d9.dll is in use (game running?) - proxy not updated')
     for fn in os.listdir(os.path.join(ROOT, 'launcher')):
         if fn.endswith('.bat'):
             txt = open(os.path.join(ROOT, 'launcher', fn), encoding='utf-8').read().replace('\r\n', '\n')

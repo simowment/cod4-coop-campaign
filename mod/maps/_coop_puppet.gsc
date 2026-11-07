@@ -9,7 +9,7 @@
 #include common_scripts\utility;
 #using_animtree( "generic_human" );
 
-precache()
+puppet_precache()
 {
 	level.coop.puppets = [];
 	level.coop.remote_weapon = [];

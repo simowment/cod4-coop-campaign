@@ -204,7 +204,8 @@ clacker_remote_use( trig, f )
 	if ( isdefined( level.flag[ "barn_assault_begins" ] ) && !flag( "barn_assault_begins" ) )
 		flag_set( "barn_assault_begins" ); // inited by _load from the barn_helidrop script_flag_true
 	autosave_by_name( "clackers_all_used_up" );
-	level thread maps\village_defend::tavern_storming_delay();
+	if ( isdefined( level.coop_fn_tavern_storming_delay ) )
+		level thread [[ level.coop_fn_tavern_storming_delay ]]();
 }
 
 // killzone_detonation (4072-4099) without radiusdamage, so the local player standing in the partner's

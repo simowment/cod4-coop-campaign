@@ -6,7 +6,17 @@ pointers on `level` so the stock code still runs unchanged when the coop scripts
 
 NL = '\r\n'
 
+def export_fn(level_file, zone, exports):
+    """Level scripts live only in their own fastfile, so mod modules (compiled in every level) cannot
+    reference them. The level's main() hands the functions over as level.coop_fn_<name> pointers."""
+    lines = ''.join('\tlevel.coop_fn_%s = %s;' % (n, ref) + NL for n, ref in exports)
+    return {'file': level_file, 'zones': (zone,), 'edits': [(r'^main\(\)\r?\n\{\r?\n', 'after', lines)]}
+
+
 PATCHES = [
+    export_fn('maps/bog_a.gsc', 'bog_a', [('abrams_gets_drawing', 'maps\\bog_a_backhalf::abrams_gets_drawing')]),
+    export_fn('maps/village_assault.gsc', 'village_assault', [('do_alasad', 'maps\\village_assault_code::do_alasad')]),
+    export_fn('maps/village_defend.gsc', 'village_defend', [('tavern_storming_delay', '::tavern_storming_delay')]),
     {
         'file': 'maps/_load.gsc',
         'edits': [

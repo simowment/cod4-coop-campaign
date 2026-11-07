@@ -74,7 +74,7 @@ shared_flag( name )
 // level dispatch
 // ---------------------------------------------------------------------------------------------
 
-main()
+levels_main()
 {
 	c = level.coop;
 	if ( !isdefined( c.shared_flags ) )

@@ -14,6 +14,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+COMMON = None
 ROOT = os.path.dirname(HERE)
 
 KEYWORDS = {'if', 'else', 'for', 'while', 'switch', 'case', 'default', 'return', 'break', 'continue',
@@ -95,6 +96,11 @@ def lint(path, res, builtins):
             errs.append('%s: #include %s not found' % (path, inc))
         else:
             inc_defs |= d
+    # a function name may not also come from an #include'd file ("function 'x' already defined")
+    for inc in includes:
+        d = res.defs(inc) or set()
+        for name in sorted(local & d):
+            errs.append('%s: function %s() is also defined in #include %s' % (path, name, inc))
     # file-scope junk
     depth = 0
     for ln, line in enumerate(lines, 1):
@@ -117,6 +123,12 @@ def lint(path, res, builtins):
             pre = line[:m.start()].rstrip()
             if qual:
                 inc = qual[:-2]
+                if inc and COMMON is not None and path.replace('\\', '/').find('/mod/') >= 0:
+                    key = inc.replace('\\', '/').lower() + '.gsc'
+                    if key not in COMMON and not os.path.isfile(os.path.join(res.mod_dir, key)):
+                        errs.append('%s:%d: %s is a level-specific script (not in common.ff); referencing it '
+                                    'breaks every other level' % (path, ln, inc))
+                        continue
                 d = res.defs(inc) if inc else local
                 if d is None:
                     errs.append('%s:%d: unknown script file %s' % (path, ln, inc))
@@ -148,6 +160,7 @@ def main():
     ap.add_argument('--raw', default=r'C:/Users/got/cod4-decomp/raw')
     ap.add_argument('--builtins', default=r'C:/Users/got/cod4-decomp/builtins_all.txt')
     ap.add_argument('--mod', default=os.path.join(ROOT, 'mod'))
+    ap.add_argument('--game', default=os.path.join(os.path.dirname(ROOT), 'Call of Duty 4-Modern Warfare'))
     ap.add_argument('files', nargs='*')
     a = ap.parse_args()
     builtins = set()
@@ -155,6 +168,12 @@ def main():
         parts = line.split()
         if len(parts) >= 2:
             builtins.add(parts[1].lower())
+    global COMMON
+    ff = os.path.join(a.game, 'zone', 'english', 'common.ff')
+    if os.path.isfile(ff):
+        sys.path.insert(0, HERE)
+        import ffraw
+        COMMON = set(k.lower() for k in ffraw.rawfiles(ff))
     res = Resolver(a.mod, a.raw)
     files = a.files
     if not files:

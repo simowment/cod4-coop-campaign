@@ -112,9 +112,9 @@ client_follow_location()
 			if ( isdefined( level.alasad_objective_location ) )
 				return; // already set up (start point)
 			if ( flag( "coop_alasad_barn" ) )
-				level thread maps\village_assault_code::do_alasad( "barn" );
+				level thread do_alasad_exported( "barn" );
 			else
-				level thread maps\village_assault_code::do_alasad( "house" );
+				level thread do_alasad_exported( "house" );
 			maps\_coop::log( "village_assault: following host al-asad location" );
 			return;
 		}
@@ -126,12 +126,12 @@ client_follow_location()
 			{
 				if ( rem[ 0 ] == "2" )
 				{
-					level thread maps\village_assault_code::do_alasad( "house" );
+					level thread do_alasad_exported( "house" );
 					return;
 				}
 				if ( rem[ 0 ] == "6" )
 				{
-					level thread maps\village_assault_code::do_alasad( "barn" );
+					level thread do_alasad_exported( "barn" );
 					return;
 				}
 			}
@@ -211,4 +211,11 @@ scene_trigger()
 	if ( level.alasad_objective_location == "2" )
 		return getent( "alasad_house_trigger", "targetname" );
 	return undefined;
+}
+
+// the stock function lives in the level fastfile; village_assault.gsc main() exports it (tools/patches.py)
+do_alasad_exported( location )
+{
+	if ( isdefined( level.coop_fn_do_alasad ) )
+		level [[ level.coop_fn_do_alasad ]]( location );
 }

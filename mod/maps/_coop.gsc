@@ -28,7 +28,6 @@ preinit()
 	c.names = [];
 	c.downed = [];
 	c.health = [];
-	c.trig = [];
 	c.ai = [];
 	c.pending_flags = [];
 	c.local_flags = [];
@@ -52,8 +51,8 @@ preinit()
 
 	// everything we draw must be precached before the level's first wait
 	precacheShader( "white" );
-	maps\_coop_puppet::precache();
-	maps\_coop_player::precache();
+	maps\_coop_puppet::puppet_precache();
+	maps\_coop_player::player_precache();
 
 	level.coop_flag_hook = ::on_flag;
 	level.coop_fail_hook = ::on_missionfailed;
@@ -81,7 +80,7 @@ postinit()
 	if ( openfile( "coop", "barrier" ) )
 		thread barrier_hud();
 
-	maps\_coop_levels::main();
+	maps\_coop_levels::levels_main();
 	openfile( "coop", "tick", 0 ); // new level: level time restarts, that is not a checkpoint reload
 	thread net_loop();
 	thread track_shots();
@@ -446,121 +445,160 @@ apply_pending_flags()
 }
 
 // ---------------------------------------------------------------------------------------------
-// triggers: a local player's hit is replayed on everyone else's copy of that trigger
+// triggers: a local player's hit is replayed on everyone else's copy of that trigger.
+//
+// Budget: the SP script VM has a small fixed variable pool and big levels (bog_a: 337 triggers,
+// 260 spawners) already use most of it. So no thread or field per trigger: one poller tests
+// "level.player istouching" against the touch triggers, and the network id is the entity number
+// (map entities get the same number on every machine; getentnum/getentbynum are dev builtins the
+// proxy enables). Only the few use/lookat/damage triggers get a waiter, since touch says nothing there.
+// State lives in small sparse arrays keyed by entity number, holding only triggers that fired.
 // ---------------------------------------------------------------------------------------------
 
 build_trigger_ids()
 {
 	c = level.coop;
-	classes = [];
-	classes[ classes.size ] = "trigger_multiple";
-	classes[ classes.size ] = "trigger_once";
-	classes[ classes.size ] = "trigger_use";
-	classes[ classes.size ] = "trigger_use_touch";
-	classes[ classes.size ] = "trigger_radius";
-	classes[ classes.size ] = "trigger_lookat";
-	classes[ classes.size ] = "trigger_damage";
+	c.trig_last = [];    // entnum -> last local/remote fire time
+	c.trig_inside = [];  // entnum -> true while the local player is inside
+	c.trig_done = [];    // entnum -> replayed trigger_once
 	c.trig_count = 0;
+	waiters = 0;
+	classes = [];
+	classes[ 0 ] = "trigger_use";
+	classes[ 1 ] = "trigger_use_touch";
+	classes[ 2 ] = "trigger_lookat";
+	classes[ 3 ] = "trigger_damage";
 	for ( ci = 0; ci < classes.size; ci++ )
 	{
 		ents = getentarray( classes[ ci ], "classname" );
-		for ( i = 0; i < ents.size; i++ )
+		for ( i = 0; i < ents.size && waiters < 48; i++ )
 		{
-			id = ci + "." + i;
-			ents[ i ].coop_id = id;
-			ents[ i ].coop_last = -100000;
-			c.trig[ id ] = ents[ i ];
-			ents[ i ] thread watch_trigger();
-			c.trig_count++;
+			ents[ i ] thread watch_event_trigger();
+			waiters++;
+		}
+	}
+	c.trig_count = waiters;
+	thread poll_touch_triggers();
+}
+
+poll_touch_triggers()
+{
+	c = level.coop;
+	classes = [];
+	classes[ 0 ] = "trigger_multiple";
+	classes[ 1 ] = "trigger_once";
+	classes[ 2 ] = "trigger_radius";
+	for ( ;; )
+	{
+		wait 0.1;
+		if ( !c.active || !isalive( level.player ) )
+			continue;
+		for ( ci = 0; ci < classes.size; ci++ )
+		{
+			ents = getentarray( classes[ ci ], "classname" );
+			for ( i = 0; i < ents.size; i++ )
+			{
+				t = ents[ i ];
+				if ( !( level.player istouching( t ) ) )
+					continue;
+				n = t getentnum();
+				if ( isdefined( c.trig_inside[ n ] ) )
+					continue; // still inside since last poll: only entering counts
+				c.trig_inside[ n ] = gettime();
+				local_trigger_hit( t, n );
+			}
+			ents = undefined;
+		}
+		// forget triggers we have left (sparse: only the few we touched are in the array)
+		keys = getarraykeys( c.trig_inside );
+		for ( k = 0; k < keys.size; k++ )
+		{
+			t = getentbynum( keys[ k ] );
+			if ( !isdefined( t ) || !( level.player istouching( t ) ) )
+				c.trig_inside[ keys[ k ] ] = undefined;
 		}
 	}
 }
 
-watch_trigger()
+watch_event_trigger()
 {
 	self endon( "death" );
 	for ( ;; )
 	{
 		self waittill( "trigger", other );
-		if ( !isdefined( other ) || other != level.player )
-			continue;
-		if ( isdefined( self.coop_local ) )
-			continue; // level module marked it player-local (kill volumes, per-player hints...)
-		now = gettime();
-		if ( isdefined( self.coop_remote_time ) && self.coop_remote_time == now )
-			continue; // our own replay of a remote hit
-		if ( now - self.coop_last < 1000 )
-			continue;
-		self.coop_last = now;
-		send( "T|" + self.coop_id );
-		if ( self.classname == "trigger_once" )
-			return;
+		if ( isdefined( other ) && other == level.player )
+			local_trigger_hit( self, self getentnum() );
 	}
+}
+
+local_trigger_hit( t, n )
+{
+	c = level.coop;
+	if ( isdefined( t.coop_local ) || isdefined( c.trig_done[ n ] ) )
+		return; // level module marked it player-local (kill volumes, hints...), or already replayed
+	now = gettime();
+	if ( isdefined( c.trig_last[ n ] ) && now - c.trig_last[ n ] < 1000 )
+		return; // includes our own replay of a remote hit this frame
+	c.trig_last[ n ] = now;
+	send( "T|" + n );
 }
 
 ev_trigger( slot, tok )
 {
+	c = level.coop;
 	if ( tok.size < 3 )
 		return;
-	t = level.coop.trig[ tok[ 2 ] ];
-	if ( !isdefined( t ) )
+	n = int( tok[ 2 ] );
+	t = getentbynum( n );
+	if ( !isdefined( t ) || !isdefined( t.classname ) || getsubstr( t.classname, 0, 8 ) != "trigger_" )
+		return;
+	if ( isdefined( t.coop_local ) || isdefined( c.trig_done[ n ] ) )
 		return;
 	now = gettime();
-	if ( now - t.coop_last < 1000 )
+	if ( isdefined( c.trig_last[ n ] ) && now - c.trig_last[ n ] < 1000 )
 		return; // we hit it ourselves a moment ago
-	if ( isdefined( t.coop_done ) || isdefined( t.coop_local ) )
-		return;
-	t.coop_last = now;
-	t.coop_remote_time = now;
+	c.trig_last[ n ] = now;
 	t notify( "trigger", level.player );
 	if ( isdefined( t ) && t.classname == "trigger_once" )
 	{
-		t.coop_done = true;
+		c.trig_done[ n ] = true;
 		t trigger_off(); // keep our own player from firing it a second time
 	}
 }
 
 // ---------------------------------------------------------------------------------------------
-// AI deaths: host reports every death, clients report kills by their player. Keys are spawner
-// export + spawn sequence, identical on each machine for scripted spawns.
+// AI deaths: host reports every death, clients report kills by their player. Ids are the spawner's
+// Radiant export number + how many AI that export has spawned so far, identical on every machine for
+// scripted spawns. Assigned from the stock global spawn-function list (no thread per spawner).
 // ---------------------------------------------------------------------------------------------
 
 build_ai_ids()
 {
 	c = level.coop;
-	spawners = getspawnerarray();
-	c.spawner_count = spawners.size;
-	for ( i = 0; i < spawners.size; i++ )
-	{
-		sp = spawners[ i ];
-		if ( isdefined( sp.export ) )
-			sp.coop_key = "e" + sp.export;
-		else
-			sp.coop_key = "s" + i;
-		sp.coop_seq = 0;
-		sp thread watch_spawner();
-	}
+	c.ai_seq = [];
+	c.spawner_count = 0;
+	teams = [];
+	teams[ 0 ] = "axis";
+	teams[ 1 ] = "allies";
+	teams[ 2 ] = "neutral";
+	for ( i = 0; i < teams.size; i++ )
+		if ( isdefined( level.spawn_funcs ) && isdefined( level.spawn_funcs[ teams[ i ] ] ) )
+			add_global_spawn_function( teams[ i ], ::on_ai_spawned );
 	ai = getaiarray();
 	for ( i = 0; i < ai.size; i++ )
-	{
 		if ( isdefined( ai[ i ].export ) )
 			ai[ i ] register_ai( "a" + ai[ i ].export );
-		else
-			ai[ i ] register_ai( "m" + i );
-	}
 }
 
-watch_spawner()
+on_ai_spawned()
 {
-	self endon( "death" );
-	for ( ;; )
-	{
-		self waittill( "spawned", guy );
-		self.coop_seq++;
-		if ( !isdefined( guy ) || !isalive( guy ) )
-			continue;
-		guy register_ai( self.coop_key + "#" + self.coop_seq );
-	}
+	if ( !isdefined( self.export ) || isdefined( self.coop_id ) )
+		return;
+	c = level.coop;
+	if ( !isdefined( c.ai_seq[ self.export ] ) )
+		c.ai_seq[ self.export ] = 0;
+	c.ai_seq[ self.export ]++;
+	self register_ai( "e" + self.export + "#" + c.ai_seq[ self.export ] );
 }
 
 register_ai( id )

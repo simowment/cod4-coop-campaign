@@ -143,9 +143,21 @@ int bridge_verify_exe(void)
 	return 1;
 }
 
+/* Developer-only builtins that are fully implemented in retail; we just clear the dev flag.
+   getentnum (method) / getentbynum (function) give coop a variable-free entity id for map entities. */
+static int enable_dev_builtin(u32 va, const char *name)
+{
+	BuiltinEntry *e = (BuiltinEntry *)va;
+	if (!e->name || strcmp(e->name, name) != 0 || e->dev != 1) { logf("bridge: %x is not dev builtin '%s'", va, name); return 0; }
+	e->dev = 0;
+	return 1;
+}
+
 int bridge_install(void)
 {
 	int ok = 1;
+	ok &= enable_dev_builtin(0x680b94, "getentnum");
+	ok &= enable_dev_builtin(0x6ddee4, "getentbynum");
 	ok &= patch_one(BT_OPENFILE, "openfile", bi_openfile);
 	ok &= patch_one(BT_CLOSEFILE, "closefile", bi_closefile);
 	ok &= patch_one(BT_FPRINTLN, "fprintln", bi_fprintln);

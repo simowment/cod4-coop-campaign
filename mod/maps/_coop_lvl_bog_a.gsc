@@ -199,8 +199,8 @@ bog_a_zpu_sync()
 		playfx( level.tankExplosion_fx, zpu.origin );
 	thread play_sound_in_space( "bog_aagun_explode", zpu.origin );
 	zpu setmodel( "vehicle_zpu4_burn" );
-	if ( isdefined( level.abrams ) )
-		maps\bog_a_backhalf::abrams_gets_drawing();
+	if ( isdefined( level.abrams ) && isdefined( level.coop_fn_abrams_gets_drawing ) )
+		[[ level.coop_fn_abrams_gets_drawing ]]();
 	maps\_coop::log( "zpu destroyed by squadmate" );
 }
 

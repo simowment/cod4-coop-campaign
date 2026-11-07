@@ -8,7 +8,7 @@
 #include maps\_utility;
 #include common_scripts\utility;
 
-precache()
+player_precache()
 {
 }
 
