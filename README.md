@@ -1,54 +1,88 @@
 # CoD4 Coop Campaign
 
-Play the Call of Duty 4: Modern Warfare single-player campaign with 2–4 players over LAN or the internet.
+Play the **Call of Duty 4: Modern Warfare** single-player campaign with 2–4 friends over LAN or the internet.
+Host a mission, share a join code, play through the campaign together. Mission transitions, cutscenes,
+checkpoints and failures stay in sync.
 
-> Status: **pre-release / untested in game.** The network layer passes its offline tests (loopback,
-> 30% packet loss). The in-game slice has not been run yet; see "Verification" below.
+> **Status: alpha, playable.** Tested in game with two instances. The core loop works: joining,
+> synchronized mission starts, squadmates, progression sync, down/revive, checkpoints, mission
+> fail and mission transitions. Automated scene tests ran the key scripted sequence of all 20 other
+> missions with no coop-caused errors (details below). A full campaign playthrough by humans has not
+> been done yet.
+
+## Quick start
+
+1. Install the mod (see **Install**). This puts `CoD4 Coop.bat` next to `iw3sp.exe`.
+2. **Host:** double-click `CoD4 Coop.bat`, enter your name, then **Host a game**. Pick a mission and how
+   many players to wait for, and click **Start hosting**. Copy the **join code** (e.g. `2H092-T0W9A`) and send
+   it to your friends.
+3. **Friends:** double-click `CoD4 Coop.bat`, then **Join a friend**, paste the code and click **Join**.
+   On the same network you don't need a code: the host shows up under *Games on your network*.
+4. Each friend's game loads the host's mission by itself. The mission waits on *"Waiting for your squad to
+   load..."* until everyone is in, and then everyone starts on the same frame.
+
+### How the connection works
+
+- The game uses **UDP port 28970** on the host.
+- When you host, the launcher asks your router to open that port (UPnP). It reads your public address
+  from the router, so no third-party service is contacted. The port is closed again when you stop
+  hosting.
+- If your router doesn't support UPnP (or you are behind carrier-grade NAT), use a VPN such as
+  **Tailscale**, ZeroTier or Radmin. The launcher detects it and shows a VPN join code. A manual port
+  forward of UDP 28970 also works.
+- Join codes just encode `IP:port`. Typing a plain IP in the code box works too.
+
+## Playing the campaign
+
+- **Pick a mission** in the launcher, or use the game's own **New Game / Mission Select** menus as host.
+  Whatever mission the host loads, every client follows, at the same start point and on the host's
+  difficulty.
+- **Mission to mission** works like solo. When the host completes a mission, every player gets the normal
+  mission-success flow and the next mission's loading briefing, and the next mission starts for everyone
+  together. A player who reaches the end first waits for the host. Missions unlock in each player's own
+  profile.
+- **Squadmates** appear as animated soldiers with name tags. Their gunfire is replayed, and the squad
+  HUD (top left) shows names and health.
+- **Down, not dead.** Lethal damage puts you down: prone, invulnerable, enemies ignore you. A squadmate
+  holds **[Use]** next to you to revive you. If you bleed out (45 s) while someone is still up, you
+  regroup next to them. The mission fails only when everyone is down.
+- **Shared progress.** Story progress and the triggers you walk into apply in your squadmates' games
+  too, enemy kills count for everyone, checkpoints come from the host, and if one player fails, the
+  squad reloads the checkpoint together.
+- **Cutscenes and scripted sequences** play natively for every player on their own screen (rigs,
+  vehicles, the AC-130, turrets). When one player starts a scene, it starts for everyone, and a player
+  who is far away is moved into it. Personal moments, such as the Killhouse course, the Coup drive and
+  your own rescue animations, stay personal.
 
 ## How it works
 
-CoD4's single-player executable (`iw3sp.exe`) has no network code at all. The multiplayer engine has
-no AI, which is why nobody has shipped a campaign coop for this game. This mod takes another route:
+CoD4's single-player executable has no network code, and the multiplayer engine has no AI, so neither
+one can run the campaign for several players. This mod uses **dual simulation** instead: every player
+runs the real campaign in their own `iw3sp.exe`, and the mod keeps the copies in step.
 
-- **Dual simulation.** Every player runs the real campaign in their own `iw3sp.exe`. Cinematics,
-  rigs, vehicle rides, the AC-130 and turrets therefore run natively for each player. The mod keeps
-  the worlds in step:
-  - **Progression flags** are merged. A flag set by any player is set for everyone, and only the host
-    can clear one.
-  - **Trigger hits.** When you walk into a trigger, it fires on your squadmates' copies too.
-  - **AI deaths.** The host reports every death and clients report their own kills. AI are matched
-    by spawner and spawn order.
-  - **Checkpoints** come from the host only, so everyone holds the same save.
-  - **Mission fail.** If one player fails, the squad fails, and everyone reloads the shared checkpoint.
-  - **Level end.** The host finishes the level. A client who reaches the end first waits for the host.
-  - **Level start barrier.** A mission does not start until the whole squad has loaded it, then
-    everyone starts on the same frame.
-- **Squadmates are visible.** Each remote player is drawn as an animated soldier: stance,
-  run/walk/sprint/crawl, aiming, and their weapon. Their gunfire is replayed, so you see tracers and
-  impacts and hear the shots. Enemies near a squadmate shoot at them.
-- **Downed and revive.** Lethal damage puts you down: you go prone, enemies ignore you, and you can
-  still use your weapon. A squadmate holds [Use] next to you to revive you. If you bleed out while
-  someone is still up, you regroup next to them. The squad only fails when everyone is down.
-- **Per-level handling** lives in `mod/maps/_coop_lvl_<level>.gsc`. It covers player-local state,
-  pulling a straggler into a scene a squadmate started, hiding squadmates during rigs, and
-  kill/out-of-bounds volumes that should only affect you.
-- **Native proxy (`d3d9.dll`).** The game loads it as its Direct3D 9 DLL. It forwards to the real
-  `d3d9.dll`, runs a UDP session (host relays, reliable ordered events plus 20 Hz poses), and wires
-  six script functions that are compiled out in retail (`openfile`, `fprintln`, `freadln`,
-  `fprintfields`, `fgetarg`, `closefile`) to that session. It touches nothing else and does nothing
-  on an unknown game build.
+- **Native proxy (`d3d9.dll`).** The game loads it as its Direct3D 9 DLL, and it forwards to the real
+  one. It runs a small UDP protocol: the host relays, reliable ordered events, and 20 Hz pose
+  snapshots. It wires six script functions that are compiled out in retail (`openfile`, `fprintln`,
+  `freadln`, `fprintfields`, `fgetarg`, `closefile`) to the session. It runs on the game's main loop,
+  and it does nothing on an unknown game build.
+- **Coop scripts** (`mod/maps/_coop*.gsc`):
+  - replication: flags (delayed and deduplicated), trigger hits, enemy deaths, checkpoints, fail, level
+    end;
+  - remote-player puppets;
+  - down/revive and the squad HUD.
+- **One module per mission** (`mod/maps/_coop_lvl_<mission>.gsc`, 21 in all). Each was written from the
+  mission's scripts and decides which moments are personal, which are shared, who gets pulled into a
+  scene, and when squadmates are hidden.
+- **Stock script hooks.** They are one-line insertions, applied at build time to scripts read from
+  *your own* game files (`tools/patches.py`). No game files are distributed.
 
 ## Requirements
 
-- CoD4 single player, **`iw3sp.exe` 1.0**: 3,017,216 bytes, SHA256 `d07c39ee…e116`. Any other build
-  makes the proxy turn itself off (pure passthrough). Builds 1.5 and later and Steam need their own
-  address table, which is not done yet.
-- The **DirectX 9.0c End-User Runtime** (it provides `d3dx9_34.dll`, which CoD4 needs). Get it from
-  Microsoft.
-- Python 3 to run the build script. It reads your own game files and writes the mod into your game
-  folder; no game files ship with this mod.
-- A network path between players on **UDP 28970**: LAN, a VPN such as Tailscale, ZeroTier or Radmin,
-  or a port forward on the host.
+- CoD4 single player, **`iw3sp.exe` 1.0**: 3,017,216 bytes, SHA256 `d07c39ee…e116`. On any other build the
+  proxy stays inactive and the game runs normally. Build 1.5+/Steam needs its own address table, which
+  is not done yet.
+- **DirectX 9.0c End-User Runtime** (`d3dx9_34.dll`), from Microsoft.
+- **Python 3** for the one-time install. **Windows PowerShell** (built in) runs the launcher.
 
 ## Install
 
@@ -56,48 +90,36 @@ no AI, which is why nobody has shipped a campaign coop for this game. This mod t
 python tools/build.py --game "C:/path/to/Call of Duty 4-Modern Warfare"
 ```
 
-This writes `Mods/coop/`, `d3d9.dll`, `Coop - Host.bat` and `Coop - Join.bat` into the game folder.
-To build the native proxy yourself, run `bash native/build.sh`. It needs mingw `gcc`/`ld`/`dlltool`
-and builds a freestanding PE32 with no CRT.
+This writes `Mods/coop/` (the stock scripts patched with the coop hooks, plus the coop scripts),
+`d3d9.dll`, `CoD4 Coop.bat` and `coop_launcher.ps1` into your game folder. The prebuilt `d3d9.dll` is
+attached to the GitHub release. Put it in `native/build/` before running the build, or build it yourself
+with `bash native/build.sh` (mingw `gcc`/`ld`/`dlltool`, freestanding PE32, no CRT).
 
-To uninstall, delete `d3d9.dll`, `Mods/coop` and the two `.bat` files.
+To uninstall, delete `d3d9.dll`, `Mods/coop`, `CoD4 Coop.bat` and `coop_launcher.ps1`.
 
-## Play
+## Testing
 
-1. Host: run `Coop - Host.bat` and enter your name, the mission (e.g. `cargoship`) and the squad size.
-   The mission holds on "Waiting for your squad to load…".
-2. Friends: run `Coop - Join.bat` and enter the host's IP. Their game loads the host's mission by
-   itself, and everyone starts together.
-3. Later missions follow the host automatically. A friend who joins mid-mission is caught up on
-   progression and moved to the host.
-
-Manual launch options: `+set fs_game mods/coop` plus either `+set coop_host 1` (optionally
-`+set coop_wait N`, `+set coop_port P`, `+set coop_maxplayers N`) or `+set coop_connect ip[:port]`,
-and `+set coop_name "Name"`. Without `coop_host` or `coop_connect` the mod stays out of the way and
-the campaign plays solo.
+| What | Result |
+|---|---|
+| Net protocol, offline (`native/test/harness.c`, host + client) | join, map handshake, barrier, ordered reliable events under 30% packet loss |
+| Script lint (`tools/gsclint.py`) | 0 problems. Checks references against the stock scripts and the engine builtin table, reserved names, unsafe flag access, and level-specific references |
+| In game, two instances on one PC (`tools/bg.ps1`, virtual monitor) | join, mission follow, start barrier, puppets, flags, triggers, kill sync (17/17), down/bleed-out/revive, checkpoint, mission fail, mission transition (bog_a → hunted) |
+| Scene tests (`tools/scene_test.py`, `tests/scene_plans.json`) | 16/20 pass. The other 4 have no coop-caused errors: aftermath ended and airplane's timer failed both players, which is stock behaviour; blackout pulled the client into the scene as designed but the plan checked the wrong flag; airlift showed no script errors but did not finish cleanly and is still unexplained. Cargoship's ending was verified by hand |
 
 ## Known limits
 
-- Each player's AI is simulated locally. Scripted waves line up, but positions drift, and an enemy
-  can survive on one screen for a moment after it died on another.
-- Remote shots are cosmetic plus approximate damage. Kills are what count.
-- Squadmates use a friendly soldier model borrowed from the level, since SP has no player body.
-- During scripted rigs (rappels, vehicles, the AC-130) squadmates are hidden, because both players
-  occupy the same seat in their own world.
-
-## Verification
-
-- `native/test/harness.c` runs the session code offline. Host and client run over loopback with the
-  join, the map handshake, the barrier, reliable events and poses. Under 30% simulated packet loss
-  all events arrived in order with no gaps.
-- `python tools/gsclint.py` statically checks every mod script. It verifies function references
-  against the stock scripts and the engine builtin table and reports 0 false positives on the stock
-  files.
-- **In game: not yet run.** On the development machine the game could not start because the DirectX
-  9 runtime is missing.
+- AI is simulated in each game separately. Scripted waves line up, but positions drift, and an enemy
+  can survive a moment longer on one screen.
+- Remote gunfire is cosmetic plus approximate damage; the kills that count are synced by ID.
+- During vehicle rides and rigs, squadmates are hidden (you share one seat). Showing them in another seat
+  is planned.
+- Flags from other players arrive after a short safety delay (~4 s). Scenes started by triggers sync on
+  the same frame.
+- Only `iw3sp.exe` 1.0 is supported.
 
 ## Credits
 
-Built with AI assistance (Claude Code). The research drew on public work by the CoD4 modding
-community. The addresses for this exe were derived independently by disassembly. Publicly documented
-1.5 addresses from JerryALT's iw3sp_mod and kejjjjj's iw3sptool were used as reference only.
+Built with AI assistance (Claude Code), including reverse engineering of the 1.0 executable, the
+network layer, the scripts and the in-game test automation. Addresses for this build were found by
+disassembly. JerryALT's iw3sp_mod and kejjjjj's iw3sptool (patch 1.5) were used as reference only. Call
+of Duty 4 is a trademark of Activision; this project contains no game files.

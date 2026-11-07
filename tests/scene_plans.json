@@ -1,0 +1,869 @@
+[
+ {
+  "level": "hunted",
+  "start": "barn",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline on host after both instances reached gameplay at the barn start."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "flag barn_moveup",
+    "why": "start_barn (hunted.gsc:4071) blocks on flag_wait(\"barn_moveup\") before area_barn_init. The flag comes from flag_trigger_init on the tunnel_trigger (hunted.gsc:190), so it is a trigger flag that should replicate. Setting it on host is the same as the host walking through the tunnel trigger."
+   },
+   {
+    "wait": 7,
+    "target": "client",
+    "cmd": "status",
+    "why": "Check the client got barn_moveup (about 4 s replication) and also entered area_barn_init (aa_barn set, squad moving up to the barn door), with no script errors."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "flag player_interruption",
+    "why": "Coop module rule 4: player_interruption is a shared_flag(), so the stealth/loud branch must match on both machines. Setting it on host forces the loud branch (barn_early_interruption, hunted.gsc:1380-1405: threat bias, squad to color y, activate_trigger barn_early_interruption). The client must leave the stealth branch too."
+   },
+   {
+    "wait": 7,
+    "target": "client",
+    "cmd": "status",
+    "why": "Check the client got player_interruption and runs the early-interruption fight like the host, instead of staying in the stealth interrogation path."
+   }
+  ],
+  "expect_replicated_flags": [
+   "barn_moveup",
+   "player_interruption"
+  ],
+  "notes": "Start \"barn\" (add_start at hunted.gsc:16). start_barn waits on barn_moveup and only then runs area_barn_init, so the first flag is the natural trigger for the barn sequence. The second flag tests the module's main rule for this level: shared_flag(\"player_interruption\"). Without it the name would make the flag local, and the client could stay in the stealth interrogation while the host went loud. Both flags are flag_init'ed: barn_moveup via flag_trigger_init at :190, player_interruption at :276. Setting player_interruption before barn_interrogation_start is a real stock path: firing a weapon early also triggers it, through set_flag_on_player_action, which start_barn itself threads at :4061. So the stock flow does not break, and the level carries on to area_field_init once barn_enemies is cleared. That clearing needs real combat, so the field/door_straggler(field_cross) part is out of scope here. No tp is used. If you want to test the stealth interrogation instead, drop the last two steps and wait for barn_truck_arrived/barn_interrogation_start. Those need Price to reach barn_rear_trigger, which a flag-only driver can't do reliably."
+ },
+ {
+  "level": "ac130",
+  "start": "junkyard",
+  "steps": [
+   {
+    "wait": 10,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline after start_junkyard: gameplay_junkyard1 has run resetPlayerKillCount and the first junkyard_spawn_trigger1/4 waves should be alive. Both players should be attached to their own level.ac130 rig, with the remote puppet hidden (hide_between(undefined, undefined))."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "killnear",
+    "why": "Host player kills an axis AI. Stock bumps level.enemiesKilledByPlayer on the host, and coop_enemy_spawned (hooked via level.LevelSpecificSpawnerCallbackThread) should send an 'AK' event so the client's ev_kill_credit adds 1 to its counter. This is the shared credit that waitForPlayerKillCount(12) depends on."
+   },
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "killnear",
+    "why": "Second host kill, to check that every kill is counted once on each machine (local by stock, remote by AK) and not twice."
+   },
+   {
+    "wait": 3,
+    "target": "client",
+    "cmd": "killnear",
+    "why": "Client kill: the AK event should now go the other way (client to host), so both counters stay equal and the junkyard1 -> junkyard2 timelines do not drift."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "flag hijacked_vehicles_stopped",
+    "why": "Story flag (flag_init in ac130.gsc:22, replicated by default per the module header). From the junkyard start its only waiter, dialog_hijack, is not running, so it is harmless here and checks host-to-client replication of an ac130 story flag."
+   },
+   {
+    "wait": 6,
+    "target": "client",
+    "cmd": "status",
+    "why": "After the ~4 s replication delay: the client should show hijacked_vehicles_stopped set, an enemiesKilledByPlayer count matching the host's (3), no script errors, and no mission_failed."
+   }
+  ],
+  "expect_replicated_flags": [
+   "hijacked_vehicles_stopped"
+  ],
+  "notes": "I read the coop module and the stock scripts; I edited no files. ac130 has no walk-in cinematics. Its scripted progression runs on timers plus waitForPlayerKillCount, so the coop rule under test is the shared kill credit sent through the 'AK' event. I chose the junkyard start because gameplay_junkyard1 resets the kill count and spawns waves within about 5-35 s, then requires 12 kills to move to junkyard2.\n\nTradeoffs:\n- No flag starts the hijack carjack scene. A vehicle node trigger starts it (vehicle_hijack_start_stop), so the hijack start would just run on its own timing.\n- I avoided 'choppers_inbound', 'friendlies_moving_to_choppers', 'friendlies_in_choppers' and 'choppers_flew_away'. Setting choppers_flew_away runs missionEnd/nextmission. Setting the others early would desync the stock dialog and the end sequence without that being coop's fault.\n- 'clear_to_engage' and 'allow_context_sensative_dialog' are already set by start_junkyard, so setting them again shows nothing.\n\nChecks:\n- Compare level.enemiesKilledByPlayer on host and client in the status lines. They should match after the kills; a mismatch of 1 per kill means an AK was lost or double-counted.\n- If killnear's kill is not credited with attacker == level.player, there will be no AK and no local stock bump. That would be a test-hook artifact, not a coop bug.\n- killnear must not hit friendlies or the church, which would trigger stock mission fail.\n- The first enemy waves may still be spawning at the first killnear. If 'no enemy' is logged, rerun with a larger first wait."
+ },
+ {
+  "level": "bog_a",
+  "start": "cobras",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline. start_cobras (bog_a_backhalf.gsc:219) sets zpu_orders_given and zpus_destroyed itself, so after ~25 s cobra_sequence on both machines has played the 'plantbeacon' radio line, set beacon_orders and is blocked on 'beaconTrig waittill trigger'. Also checks that bog_a_zpu_sync stayed out of it (it skips on the cobras start point), so no 'zpu destroyed by squadmate' log should appear."
+   },
+   {
+    "wait": 3,
+    "target": "client",
+    "cmd": "status",
+    "why": "Client baseline. It should show the same beacon_orders state and no ZPU sync log."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "flag beacon_planted",
+    "why": "Acts as if the host planted the IR beacon. Setting the flag directly does not wake the host's own cobra_sequence. The coop thread bog_a_beacon_sync runs on the host too: it re-notifies beaconTrig every 0.5 s until cobra_sequence consumes and deletes it, then cobra1/cobra2 spawn. The flag replicates to the client about 4 s later, where the same thread has to drive the client's own cobra_sequence (this is the late-replay case the module was written for). coop_remote_time should stop the client from echoing the trigger back."
+   },
+   {
+    "wait": 10,
+    "target": "client",
+    "cmd": "status",
+    "why": "Checks that the flag reached the client, its beaconTrig was consumed (cobras spawned, music changed to bog_a_victory) and there are no script errors or echoed trigger loops."
+   },
+   {
+    "wait": 60,
+    "target": "host",
+    "cmd": "status",
+    "why": "The cobras fly their flightplan, which should lead to pilot_final_dialogue, cobra_success and ending_sequence on the host (the tank_talk teleport/anim_reach). This checks that the cobra run finished without errors. reached_ending_area is not set on purpose (see notes)."
+   }
+  ],
+  "expect_replicated_flags": [
+   "beacon_planted"
+  ],
+  "notes": "Plan for bog_a in coop, starting from the stock \"cobras\" start point (add_start in bog_a.gsc:54).\n\n**What it tests:** bog_a_beacon_sync in _coop_lvl_bog_a.gsc.\n\n**Why the beacon flag:** beacon_planted is flag_init'ed at bog_a_backhalf.gsc:114. The stock flow sets it only after beaconTrig is used (bog_a_backhalf.gsc:785-793). Setting the flag directly on the host does not, on its own, release the host's cobra_sequence. It relies on the coop beacon_sync thread, which runs on every machine, to fire the trigger. So if the host's cobras never spawn, that is a sign beacon_sync has failed, not a stock problem.\n\n**Expected logs and replication:**\n- On the cobras start, zpus_destroyed is set by the start point itself. bog_a_zpu_sync must return early with no ZPU visuals and no \"zpu destroyed by squadmate\" log.\n- cobra_success and pilot_final_dialogue may also replicate later if the cobra flight finishes within the last wait. They are not required in expect_replicated_flags.\n\n**Flags avoided on purpose:**\n- **reached_ending_area:** ending_sequence calls nextmission after about 15 s. That would end the level, and when it is forced it skips the stock tank_talk distance check. The ending pull (bog_a_ending_pull) needs a separate run from the \"end\" start point, ideally with the client teleported away. No zone coordinates were checked for that teleport, so no tp steps are used here.\n- **zpus_destroyed on the \"zpu\" start:** this would test the ZPU C4 sync. On the host it would release cobra_sequence without any C4 and leave the host's own zpu_c4 hanging. That is acceptable but less clean, so it is a candidate for a second run if wanted."
+ },
+ {
+  "level": "coup",
+  "start": "shore",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline. With the shore start both copies are in the car (execDrive at anim time 0.80, flag 'drive' set by startShore). The remote puppet should be hidden on both because of hide_between(undefined, undefined)."
+   },
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "flag drive_carexit",
+    "why": "Starts the car-exit sequence on the host only, as if the host's car had reached the carexit trigger_radius first. execCarExit (coup.gsc:366-381) spawns carexit_leftguard/rightguard and the ziptie4/4b scenes, then waits for the car's 'single anim' end before the carexit link and blackouts. Setting it a little early is safe in stock: it only spawns guards early and waits on the car anim. drive_carexit is a script_flag on a flag_set trigger in coup.ff.zone, so _coop_lvl_coup marks it local_flag."
+   },
+   {
+    "wait": 6,
+    "target": "client",
+    "cmd": "status",
+    "why": "About 6 s later (past the ~4 s replication delay) the client must NOT have drive_carexit set and must not have spawned the carexit guards early. Its own car should reach the trigger on its own timeline. Check that neither log has script errors."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "flag drive_firingsquad",
+    "why": "A second local roadside scene flag on the host (drive_firingsquad, coup.gsc:1281-1286: scripted_spawn2 of the captain plus scripted_array_spawn guard_firingsquad). On the client its firing squad must not spawn from replication, and the host's AI deaths must not be reported (no_death_reports / coop_remote_kill)."
+   },
+   {
+    "wait": 8,
+    "target": "client",
+    "cmd": "status",
+    "why": "Final check: the client is still driving or exiting on its own timeline with no replicated scene flags and no script errors. Later the host's car anim ends and the host's carexit/blackout chain runs on its own."
+   }
+  ],
+  "expect_replicated_flags": [],
+  "notes": "Every scene flag in coup is local in _coop_lvl_coup.gsc: drive, doors_open, ending, firingsquad_atnodes, firingsquad_aiming, runners2_dead, and every script_flag of a flag_set trigger, which includes all the drive_* flags and basehelicopters_flyaway. So the expected result is that nothing replicates. The test checks that the client does NOT follow the host and that its own lockstep drive keeps running. If drive_carexit or drive_firingsquad shows up on the client, the local_flag registration failed.\n\nWhy the shore start: it puts the car at anim time 0.80, before the carexit trigger. The carexit start (0.88) risks the trigger firing naturally during the ~25 s warmup.\n\nFiring drive_carexit early does not break stock flow. execCarExit only spawns the two carexit guards and the ziptie4 scenes, then blocks on level.car waittillmatch(\"single anim\",\"end\") before any player relink.\n\ndrive_firingsquad may already be behind the car at 0.80 (I did not determine the trigger order along the path). If so, setting it again is a no-op or spawns the squad off-screen, which is harmless in stock. A spawn failure from scripted_spawn2 for that reason would not be coop's fault.\n\nNot exercised:\n- 'ending' or the blackout chain via flags. The ending is reached through execCarExit after the car anim ends, not through a flag.\n- 'runners2_dead'. It is a deathflag whose prerequisites (the drive_runners2 spawns) the shore start does not satisfy.\n- The firingsquad_* flags. They are set internally by syncAiming/syncFireNodes.\n\nNo tp is used, because the player is linked to the car rig all level."
+ },
+ {
+  "level": "killhouse",
+  "start": "ship",
+  "steps": [
+   {
+    "wait": 0,
+    "target": "host",
+    "cmd": "flag open_ship_hanger",
+    "why": "As if the host walked into the hangar trigger (zone: trigger_multiple flag_set script_flag open_ship_hanger at -15 -1346 10, script_flag_true obstacle_complete, which report_to_price sets on the ship start). Starts the reveal on the host: the hangar door slides open (killhouse.gsc:2008-2012), the at_ladder hint thread starts, music_control plays killhouse_price (2545), and reveal_anims gets past its flag_wait (2047). _coop_lvl_killhouse marks open_ship_hanger local_flag plus its flag_set trigger as local, so this should NOT replicate. The client's door should stay shut and its Price/SAS stay paused."
+   },
+   {
+    "wait": 8,
+    "target": "host",
+    "cmd": "tp -135 -1197 12 54",
+    "why": "Puts the host inside the looking_at_price trigger_multiple (zone origin -135 -1197 12, model *161), facing roughly toward start_reveal->trigger. reveal_anims' level.player istouching(looking_at_price) loop (killhouse.gsc:2049) unpauses the SAS and Price reveal anims. reveal_dialog_starting is set 3 s later and ship_hanger_clip is deleted. All of these are local by the coop module, so the client's scene should not move. If the brush origin is not inside the volume, the reveal just stays paused. That still tests replication, but not the cinematic."
+   },
+   {
+    "wait": 6,
+    "target": "host",
+    "cmd": "status",
+    "why": "Logs host state while the reveal cinematic runs (reveal_done / price_reveal_done come when the anims finish). Wait about 4 s of replication time and check that the client did not get open_ship_hanger or reveal_dialog_starting."
+   },
+   {
+    "wait": 4,
+    "target": "client",
+    "cmd": "flag open_ship_hanger",
+    "why": "The client reaches the hangar on its own: its own copy of the per-player reveal should now start (door, music, Gaz/Price reach). Confirms the local scene runs cleanly on the client after the host's copy already ran, with no script errors from entities the host's run changed (for example ship_hanger_clip was deleted only on the host instance)."
+   },
+   {
+    "wait": 2,
+    "target": "client",
+    "cmd": "tp -135 -1197 12 54",
+    "why": "The client steps into looking_at_price. Its reveal anims unpause and play on the client copy only. A final status/log check of both instances should show each ran its own reveal with no errors."
+   }
+  ],
+  "expect_replicated_flags": [],
+  "notes": "Start 'ship' (reveal_start, killhouse.gsc:1956) puts the player at start_reveal (-430 -1603 32) and threads report_to_price(). That sets aa_cargoship and obstacle_complete natively on both instances, so the open_ship_hanger trigger's script_flag_true precondition is met. This is the closest start to the level's one real cinematic, the Price/SAS reveal. The coop module plays this scene per player and never pulls the other player: open_ship_hanger, at_ladder, on_ladder, reveal_dialog_starting, reveal_done, price_reveal_done and reveal_dialog_done are all local_flag, and the open_ship_hanger/at_ladder/on_ladder flag_set triggers and looking_at_price are local triggers. So the expected result is NOT that the client follows. It is that nothing replicates (expect_replicated_flags empty) and the client's scene stays idle until the client triggers it itself. If open_ship_hanger or reveal_dialog_starting shows up on the client after the host step, local_flag is not working. Do not fire on_ladder: it notifies end_idle and threads cargoship_training(), which then waits on at_top_of_ladder and the course flags. That is a separate solo course with failure timers that could call missionFailedWrapper, which the framework turns into a squad-wide fail. The tp coordinates are the looking_at_price brush trigger's entity origin from the zone. I am assuming that origin is inside its volume; if it is not, the reveal unpause will not fire, but the replication checks still hold. Other zone entities: at_ladder trigger at 370 -964 34, on_ladder at 374 -956 160 (do not tp there, for the reason above). killnear is not used: there are no enemies in this level."
+ },
+ {
+  "level": "bog_b",
+  "start": "alley",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline after the alley start: both instances are at playerstart_alley (2912 -3601 -119.1, yaw 195.1) and the alley friendlies have spawned."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "tp 3137 -3724 -91 195",
+    "why": "Move the host into the trigger_multiple with script_noteworthy start_dumpster_sequence (zone origin 3137 -3724 -91, color r27). alley_dumpster_sequence() (bog_b.gsc:894) waits on it, then starts the dumpster peek (anim_reach + dumpster_peek). The trigger hit should replay on the client so its own copy of the sequence also starts."
+   },
+   {
+    "wait": 4,
+    "target": "host",
+    "cmd": "flag player_passed_dumpster",
+    "why": "Host acts as if it passed the dumpster. player_passed_dumpster is flag_init'ed (bog_b.gsc:59), and the coop module makes it shared_flag. dumpsterGuy_push_condition3 then sets start_dumpster_push and the dumpster push anim (Price + dumpsterGuy) runs, which leads to dumpster_pushed and removing alley_seperation_clip. The client should get the flag despite the 'player_' name and run its own push."
+   },
+   {
+    "wait": 15,
+    "target": "host",
+    "cmd": "status",
+    "why": "Give the push time to finish (anim_reach of Price, dumpster_push anim). Expect start_dumpster_push and dumpster_pushed set on the host."
+   },
+   {
+    "wait": 2,
+    "target": "client",
+    "cmd": "status",
+    "why": "Check that the client got player_passed_dumpster / start_dumpster_push, ran the push with no script errors and reached dumpster_pushed."
+   }
+  ],
+  "expect_replicated_flags": [
+   "player_passed_dumpster",
+   "start_dumpster_push"
+  ],
+  "notes": "I picked the alley start because the dumpster push is the main cinematic you can reach from a start point without waiting on vehicle timing. The tank crush on the default start needs the local Abrams to reach truck_crush_node; truck_crush_tank_in_position is a local_flag, so that test depends on timing. Setting player_passed_dumpster before the peek anim ends is safe: condition3 only waits on the flag, and start_dumpster_push is waited after the peek, so the push just starts right after the peek. It does not break the stock flow. The flag fires at about 33 s of level time (25 s plus the step waits), after the 15 s replication cutoff, so it reaches the client after about 4 s. The tp coordinate is the trigger brush origin from the zone entity string. Its z (-91) is about 28 units above the start point's z, so the player may drop slightly. If the start_dumpster_sequence hit does not replay on the client, the client's alley_dumpster_sequence stays stuck at trig waittill. You would then see start_dumpster_push set on the client but no push anim. That would be a coop trigger-replication bug, not stock behaviour. dumpster_pushed is set by each machine's own copy of the sequence. It may also replicate as a story flag, but don't count on it. Do not use killnear here: clearing the alley sets alley_cleared, which is a second path to start_dumpster_push and would hide whether the shared_flag path works. Fallback: tp the host into the player_passed_dumpster trigger (2718 -4103 -72) instead of setting the flag. That tests the trigger-replay path to the same shared_flag."
+ },
+ {
+  "level": "aftermath",
+  "start": "",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline at ~27 s level time. player_wakeup (aftermath.gsc:339-392) has unfrozen the player and set the local flag 'awake' at about 16 s on both machines. Check the client's spread_wakeup log line too."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "tp -608 8680 670 39",
+    "why": "Puts the host inside trigger_multiple 'raze' (zone entity origin -608 8680 688, z lowered toward the ~660 floor). Yaw 39 points at building_collapse (3742 12204 2988, aim point -1000 z), so the host's within_fov check at aftermath.gsc:232 passes and the building collapse starts. This spot is 254 units from the nearest force_fall radius (142 at -632 8426) and clear of death_point and outside."
+   },
+   {
+    "wait": 3,
+    "target": "client",
+    "cmd": "status",
+    "why": "The raze trigger is shared, so the client's building_collapse should be released too. The client is still at its wake-up spot, yaw about 25, with the building at about 38.6 degrees, which is inside the 45-degree cone, so it should play its own local copy of the collapse."
+   },
+   {
+    "wait": 12,
+    "target": "host",
+    "cmd": "flag radiation_death",
+    "why": "Starts the shared ending (radiation_death, aftermath.gsc:174-223). By now the host's collapse has finished (about 10 s: moveto 7 s, rotate, then 'recovered' notify), so the host's radiation_death thread runs on past its waittill('recovered') at :192 to the white/black overlays and nextmission()."
+   },
+   {
+    "wait": 6,
+    "target": "client",
+    "cmd": "status",
+    "why": "The flag should have replicated by now (after ~4 s): the client should be prone and frozen with the aftermath_pain vision set and then follow the host's nextmission, with no script errors."
+   }
+  ],
+  "expect_replicated_flags": [
+   "radiation_death"
+  ],
+  "notes": "aftermath has no add_start(), so only the default start exists. Only 'radiation_death' is flag-initialised and not local: it uses flag_trigger_init on trigger death_point (aftermath.gsc:41). 'awake', 'fall', 'collapse' and 'collapse_done' are local_flag in _coop_lvl_aftermath.gsc and must NOT show up replicated on the client. Setting any of them is pointless or would break the flow ('collapse_done' early would skip the forced raze in countdown_to_death), so the plan does not set them.\n\nTiming limit: stock countdown_to_death fires radiation_death by itself at about 95 s level time (outside-trigger timeout 50 s + 30 + 15), so all steps finish well before that, around 50 s.\n\nWatch-outs:\n(1) radiation_death waits for level notify 'recovered' (:192), which only building_collapse sends (:259). If a machine never played its collapse, its death sequence stops after the stumble and never reaches nextmission. That happens if the client's player is not facing within 45 degrees of the building (its yaw starts at 25 and the building is at ~38.6) or if the raze trigger did not replicate. That is the coop behaviour this test checks. It is not a stock bug, but the client then waits on the host's nextmission. If the client collapse does not start, an optional extra step is client 'tp -989 8433 666 39'. That is the stock wake-up origin from aftermath.gsc:352, turned toward the building.\n(2) The tp z of 670 is an estimate. The raze brush origin is 688 and the info_player_start / triggers sit at 660-662, so the player just drops a few units.\n(3) radiation_death sends 'dying', which ends countdown_to_death on the host. That is expected."
+ },
+ {
+  "level": "armada",
+  "start": "end",
+  "steps": [
+   {
+    "wait": 0,
+    "target": "client",
+    "cmd": "status",
+    "why": "Baseline once both are in gameplay. end_start() has already set start_first_obj, hq_entered, hq_cleared, on_ground, regrouped, tvstation_entered, news_room_clear and entered_atrium, and notified end_positions, so final_breach() should be at 'trigger_start_final_breach waittill trigger' or past it. Check that the puppets are visible, since hide_between(undefined, start_first_obj) has ended."
+   },
+   {
+    "wait": 1,
+    "target": "client",
+    "cmd": "tp 1951.5 25130.5 20 350",
+    "why": "Move the client far from the stack-up point. This is the tv_start script_origin from the zone. It is about 3500 units from trigger_start_final_breach (4262 22438 356), well past the 1500 pull radius. The host stays at end_start (4184 22412 336, about 80 units from that trigger), so the host keeps touching it and its touch replicates."
+   },
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "status",
+    "why": "The host is at the stack-up point. Stock flow: the breachers arrive, final_volume notifies ready_to_breach, breach_ready_flag is set, Griggs says 'I hear him', then flag_set(i_hear_him) at armada.gsc:1740."
+   },
+   {
+    "wait": 35,
+    "target": "host",
+    "cmd": "flag i_hear_him",
+    "why": "Backstop in case stock flow has not set i_hear_him by now. If it is already set, this does nothing. i_hear_him is created by _load from trigger_final_volume's script_flag_true (its flag_init at armada.gsc:105 is commented out). This step exercises replication and _coop_lvl_armada's pull_on_flag(i_hear_him, trigger_start_final_breach, 1500) on the client."
+   },
+   {
+    "wait": 6,
+    "target": "client",
+    "cmd": "status",
+    "why": "The client should have been pulled to the trigger_start_final_breach origin (about 4262 22438 356) with the 'Regrouping with your squad' message, and should have no script errors. If the client's origin is still near tv_start, pull_on_flag failed, or the flag was set before step 2 (see notes)."
+   }
+  ],
+  "expect_replicated_flags": [
+   "i_hear_him"
+  ],
+  "notes": "The test targets the final breach and ending sequence (armada.gsc:1678-1758), which is the module's only real coop rule besides the heli-ride hide_between: pull_on_flag i_hear_him -> trigger_start_final_breach, radius 1500. The 'end' start point puts the player at end_start, about 80 units from trigger_start_final_breach, so stock flow should run the breach on its own on both machines.\n\nTiming risk: the breachers might reach the door and Griggs might finish his line before the driver's ~25 s gameplay wait ends. In that case i_hear_him is already set on the client before the step-2 teleport, so no pull can happen. That is a test-timing artifact, not a coop bug. If the step-5 status shows the client still near tv_start, check the log to see whether i_hear_him was set before the teleport. If it was, rerun with the teleport issued as early as the driver allows.\n\nThe step-4 host 'flag i_hear_him' is a backstop and does nothing if stock flow already set the flag. If stock had NOT set it yet (breach_ready_flag still pending), forcing it turns on trigger_final_volume early. If a player then triggered the breach before final_breach() reaches 'eVolume waittill execute_the_breach', that notify could be missed and the ending could stall. That would be a stock-order problem caused by the forced flag, not coop's fault. Nobody stands in final_volume (4532 22229 356) during this test, so the risk is low.\n\nFlags not used: start_first_obj, hq_entered and the other progression flags are all set by end_start itself. near_tv is local, and aa_* / player_* flags are local by convention. The teleport coordinates are the zone origins of tv_start (1951.5 25130.5 20); for reference, end_start is 4184 22412 336 and trigger_start_final_breach is 4262 22438 356. Expected end state: the client sits near the final room with the squad and the ending dialogue plays on both machines. nextmission is host-driven by _coop."
+ },
+ {
+  "level": "blackout",
+  "start": "blackout",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "client",
+    "cmd": "tp -2996.8 -3104.2 324.7 32",
+    "why": "Move the client to a node_pathnode behind the start (zone entity string, origin -2996.8 -3104.2 324.7). It is about 1490 units from the player_at_blackout_door trigger (-1532 -3358 420), past the 1200 pull_on_flag radius, so the straggler pull in _coop_lvl_blackout.gsc gets exercised. The yaw of 32 matches the angles of player_blackout_org."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline before the lights-out sequence: both players at the blackout house start, Price and Gaz walking up to the door (blackout.gsc:1197-1214)."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "tp -1532 -3358 420 0",
+    "why": "Put the host inside the flag_set_touching trigger (script_flag player_at_blackout_door, origin -1532 -3358 420 from the zone). The host touches it locally, which should run blackout_latch_local: it sets the flag, logs 'latched player_at_blackout_door' and sends 'latch|player_at_blackout_door'."
+   },
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "flag player_at_blackout_door",
+    "why": "Backup in case the brush-center teleport misses the volume. The flag is flag_init'ed by its trigger's script_flag, and a direct flag_set also goes through the latch path. Once latched, the host keeps it set even after the touch clears it."
+   },
+   {
+    "wait": 12,
+    "target": "client",
+    "cmd": "status",
+    "why": "About 12 s after the latch, check that the client received the latch event: the flag should be held set, the client pulled toward the door, the scene running past flag_wait at blackout.gsc:1216 (Price plays gaz_do_it, then blackout_lights_go_out sets lights_out), and no script errors."
+   }
+  ],
+  "expect_replicated_flags": [
+   "player_at_blackout_door",
+   "lights_out"
+  ],
+  "notes": "Target: the lights-out cinematic at the blackout house (blackout.gsc:1197-1235, blackout_code.gsc:3115 and 4193). The coop module covers it with blackout_latch(\"player_at_blackout_door\"): a local flag_set_touching trigger plus a latch event. It also adds pull_on_flag(player_at_blackout_door, door, 1200). Start point \"blackout\" (start_blackout, blackout.gsc:1091) already sets go_up_hill, go_to_overlook, overlook_attack_begins, farm_complete, blackout_house_begins and go_through_burning_house, so the scene's prerequisites are met on both machines.\n\nThe flag reaches the client through the module's own latch|<flag> event, not through normal flag replication, so the client log should show the latch arriving.\n\nlights_out is set by each instance's own scene (blackout_lights_go_out, blackout_code.gsc:3117). It may also arrive replicated from the host. Either way it should only appear after the latch.\n\nStock behaviour, not coop bugs: Price still waits for Gaz to reach his goal (level.gaz waittill goal, blackout.gsc:1214) before he checks the door flag, so lights-out can come a few seconds after the latch. The flag stays set on both machines because of the latch. If the client's status shows lights_out late, give it more time rather than calling it a failure.\n\nThe pull radius check: start origin (-2181.7 -3079.5) to the door trigger is only about 707 units. That is why step 1 moves the client to a pathnode about 1490 units away. Without that move, no pull would happen.\n\nTeleport coordinates are trigger and node origins from blackout.ff.zone. The door trigger origin is a brush center, so the host may drop a little after the teleport. That is harmless.\n\nI avoided player_in_house / gaz_runs_by_window and later flags, because they would skip Price's door animation. I did not edit any files."
+ },
+ {
+  "level": "village_defend",
+  "start": "clackers",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline. start_clackers sets objective_detonators and detonators_activate, so both sims have all 4 detonators armed (level.objectiveClackers = 4, clacker_*_available set per sim)."
+   },
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "flag nearslope_exploded",
+    "why": "Acts as if the host fired the near-slope detonator. This tests coop clacker_remote_sync -> clacker_remote_use on the client after the flag replicates about 4 s later: hide the detonator, killzone fx, kill axis AI near the squibs, delete the trigger/volume/marker, reprint objective 5, objectiveClackers 4->3. The host's trigger was never deleted by a stock clacker_fire, so the host takes the same remote path."
+   },
+   {
+    "wait": 8,
+    "target": "host",
+    "cmd": "flag farslope_exploded",
+    "why": "Second detonator. With nearslope it also satisfies stock flag_wait pair 2614-2617 -> clacker_far_and_near_slope_done. Checks that the helidrop bait logic (2406-2444) reacts the same in both sims."
+   },
+   {
+    "wait": 8,
+    "target": "host",
+    "cmd": "flag crashsite_exploded",
+    "why": "Third detonator. objectiveClackers 2->1 in each sim."
+   },
+   {
+    "wait": 8,
+    "target": "host",
+    "cmd": "flag cliffside_exploded",
+    "why": "Last detonator. In each sim the count reaches 0, so clacker_remote_use sets fall_back_to_barn and barn_assault_begins, autosaves, and runs coop_fn_tavern_storming_delay. This covers the soft-lock fix named in the module header."
+   },
+   {
+    "wait": 10,
+    "target": "client",
+    "cmd": "status",
+    "why": "Confirm the client got all four *_exploded flags, logged 'village_defend: remote detonation <flag>' 4 times, and reached fall_back_to_barn without script errors (for example from clacker_markers/clacker_standby threads that still reference the deleted useVolume/trigger)."
+   }
+  ],
+  "expect_replicated_flags": [
+   "nearslope_exploded",
+   "farslope_exploded",
+   "crashsite_exploded",
+   "cliffside_exploded",
+   "fall_back_to_barn"
+  ],
+  "notes": "Start point: 'clackers' (add_start at village_defend.gsc:86). All four *_exploded flags are flag_init'ed at village_defend.gsc:184-187. No teleports are used. Both players spawn at node player_start_clacker, so neither holds a detonator ('got_the_clacker' is clear) and the drop-c4 branch of clacker_remote_use is not exercised. Because the flags are set by the test hook and not by stock clacker_fire, the host also runs clacker_remote_use (its trigger still exists after waittillframeend). So the host log should also show the 'remote detonation' lines and the host counts down in step with the client. That is expected, not a bug. fall_back_to_barn is set on its own in each sim when the count reaches 0, and it may also replicate from the host. If either sim lacks it, the countdown failed. Things to watch for: stock threads (clacker_standby / clacker_markers, 2688-2760) still running against the deleted trigger, useVolume or markers can cause 'undefined'/removed-entity script errors. If such an error shows up on both sims equally, it comes from the coop remote-use path, not from replication. The killzone kills only reach axis AI near the squibs, so few kills are likely right after the start. 'killnear' is left out on purpose."
+ },
+ {
+  "level": "village_assault",
+  "start": "alasad_barn",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline on host. start_alasad_barn has run do_alasad(\"barn\"), so level.alasad_objective_location=\"6\" and host_publish_location should have set coop_alasad_barn."
+   },
+   {
+    "wait": 1,
+    "target": "client",
+    "cmd": "status",
+    "why": "Baseline on client. The coop module set level.alasad_sequence_init on the first frame, and the stock start still calls do_alasad(\"barn\"). Check that coop_alasad_barn arrived and that client_follow_location returned early with no second do_alasad thread."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "tp 864 7120 965 87",
+    "why": "Moves the host into trigger_radius alasad_barn_trigger (zone origin 864 7120 960, radius 327, height 128). The player start (1150 6495 980) is already inside alasad_barn_area (origin 1197 6881 912, radius 832), so alasad_sequence_ready is waiting on this trigger. Yaw 87 is the yaw of alasad_barn_playerlocation and faces the barn door/node, so Price's waittill_player_lookat(cos60) can pass. This starts Interrogation A on the host and fires announce_scene_start, which sets coop_alasad_go."
+   },
+   {
+    "wait": 8,
+    "target": "client",
+    "cmd": "status",
+    "why": "About 4 s for coop_alasad_go to replicate, then 1.5 s plus 0.5 s for pull_into_scene. The client should be pulled into alasad_barn_trigger facing Price, or get a local trigger notify because it is inside the area, and start its own scene A natively. Its local alasad_sequence_started must not be overwritten by the host."
+   },
+   {
+    "wait": 30,
+    "target": "host",
+    "cmd": "status",
+    "why": "After the interrogationA anim, goBlack and scene B (movePlayerToLocation alasad_barn_playerlocation), check that the puppets are hidden (hide_between alasad_sequence_started) and that there are no script errors. The client should be at the same point of the scene."
+   }
+  ],
+  "expect_replicated_flags": [
+   "coop_alasad_barn",
+   "coop_alasad_go"
+  ],
+  "notes": "The level has no stock trigger flags that start the scene. Its only flag_init'ed flags are gave_air_support_hint, alasad_sequence_started, air_support_refueling, delete_attack_coord_hint and ammo_cheat_for_chopper, and the coop module makes all five local. So the plan starts the sequence by teleporting the host into the start trigger, using zone entity origins, instead of setting a flag.\n\nDo NOT 'flag alasad_sequence_started' or 'flag coop_alasad_go' by hand. alasad_sequence_started is the level endon of alasad_sequence_wait and is set only after the Price lookat, so setting it early would kill the stock scene. Setting coop_alasad_go directly would only test the client pull, not a real host scene start.\n\ncoop_alasad_barn is set by the host at level start, before the 15 s replication window. If the client status at step 2 does not show it yet, recheck at step 4: the start point already sets the client's own location, so the scene still works.\n\nIf waittill_player_lookat stalls on the host because Price is not yet in view (he anim_reaches the node at about 835 7207), the host scene will not start and coop_alasad_go will not be set. That is a stock lookat requirement, not a coop fault.\n\nThe scene ends with nextmission() on the host after the execution notes. The client should wait under framework control.\n\nSources: /C:/Users/got/Downloads/Call.of.Duty.4.Modern.Warfare/cod4-coop/mod/maps/_coop_lvl_village_assault.gsc, /C:/Users/got/cod4-decomp/raw/maps/village_assault_code.gsc:2195-2420, zone entities in /C:/Users/got/cod4-decomp/raw/_zones/village_assault.ff.zone near lines 310195-310849."
+ },
+ {
+  "level": "sniperescape",
+  "start": "rappel",
+  "steps": [
+   {
+    "wait": 0,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline on the host after the 'rappel' start (rappel_out_of_hotel, sniperescape.gsc:863). Both players are still in the hotel window, player_rappel() has armed rappel_trigger (822-831), and Price walks to price_rappel_node."
+   },
+   {
+    "wait": 0,
+    "target": "client",
+    "cmd": "status",
+    "why": "Baseline on the client. Check that both sims are in the same pre-rappel state and that coop's delayed_setup threads (rappel_hide, rappel_straggler) loaded without script errors."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "flag apartment_explosion",
+    "why": "Fires the hotel-collapse/rappel beat on the host as if the host had rappelled (in stock, player_rappel sets it 1.2 s after use, at 844; Price's apartment_explosion() thread also sets it 4 s after he reaches his node, 931/955). flag_init'ed at sniperescape.gsc:212. It runs blow_up_hotel (274-276) and the coop rappel_straggler(), which should push the host down the rope with trig notify trigger. After about 4 s it replicates to the client, whose straggler should do the same before the explosion_death_trigger deathtouch chain kills him."
+   },
+   {
+    "wait": 7,
+    "target": "client",
+    "cmd": "status",
+    "why": "Check that the client got apartment_explosion, logged 'sniperescape: forcing straggler rappel' (or had already rappelled through the replicated rappel_trigger), that player_rappels is set locally, that the puppet is hidden (rappel_hide), and that he did not die in the collapse."
+   },
+   {
+    "wait": 12,
+    "target": "host",
+    "cmd": "status",
+    "why": "After the rappel anim ends (unlink, give_back_weapons, heli_moves_on at +1.5 s), check that the host is alive at the bottom, puppets are visible again (heli_moves_on or the 15 s timeout in rappel_hide), and battle_through_heat_area started with no script errors."
+   }
+  ],
+  "expect_replicated_flags": [
+   "apartment_explosion"
+  ],
+  "notes": "Why the rappel start: it sits right on the main coop-specific sequence in _coop_lvl_sniperescape.gsc. That covers rappel_trigger replication, rappel_hide (player_rappels to heli_moves_on), and the rappel_straggler safety net on the replicated apartment_explosion. The rappel start spawns no teleport, so both players stay at the default hotel spawn and no coordinates are needed. No tp is used. rappel_trigger is a use trigger moved to (481.4, -10823.2, 1068.9) at sniperescape.gsc:826, and teleporting there would not press use anyway.\n\nCaveat 1: in stock, apartment_explosion also fires by itself 4 s after Price reaches price_rappel_node (price_climbs_until_player_rappels, 924-931 / 948-955). So during the driver's ~25 s warm-up it may already be set on both sims, and the straggler may already have fired on its own. If so, the host flag step does nothing and the status lines should show that both players were already forced down the rope. That is still a valid pass.\n\nCaveat 2: if a straggler fails, deathtouch (exchange.gsc:2196-2225) kills that player. That is the stock result of not rappelling, not a coop bug, unless the log shows that the straggler did not run or that the trigger was missing while player_rappels was unset.\n\nplayer_rappels is player-local by name and should NOT replicate. hotel_destroyed and player_gets_off_turret are set by each sim's own blow_up_hotel, so they will look set on both without replicating. heli_moves_on is not flag_init'ed in the level gsc (it is a vehicle/script flag set at 860). Do not fire it by hand.\n\nNot chosen: the default-start Barrett/exchange flow. Firing player_attacks_exchange (shared_flag) before Zakhaev has spawned (zak_spawns/zak_arrives) would break the stock exchange timeline, and that would not be coop's fault."
+ },
+ {
+  "level": "airlift",
+  "start": "cobrastreets",
+  "steps": [
+   {
+    "wait": 15,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline after the cobrastreets start. Each copy's seaknight flies the short path from flightPathstart_cobrastreets (5209 8442 810) to seaknight_land_cobrastreets (5340 8056) and lands. cobra_streetfight then spawns that copy's pilot (cobrapilot_spawn), starts the 90 s rescue_timer and dismounts the gun. mark19_puppet_hide should have released the puppets by now."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "flag player_near_crash_site",
+    "why": "script_flag of the flag_set trigger_multiple at 3248 8064 384 (zone). On the host this releases cobrapilot_think :2794 (pilot waves and becomes useable) and the Vasquez 'pull her out' dialogue :2496. It replicates to the client, which must not throw errors."
+   },
+   {
+    "wait": 6,
+    "target": "host",
+    "cmd": "flag pilot_taken_from_cockpit",
+    "why": "Acts as if the host picked up the pilot. On every copy, coop pilot_pickup_pull() should notify its own level.cobrapilot 'trigger' (the host's own fallback does this too), so each player plays the player_carry 'wounded_pullout' rig on node_pilot_crash (3016 8040 296), the puppets are hidden for the rig, and AA_nuke_init is threaded. The client gets the flag about 4 s later and should log 'airlift: joined the pilot pull-out'."
+   },
+   {
+    "wait": 20,
+    "target": "host",
+    "cmd": "tp 5211.9 8072.9 381 349",
+    "why": "Origin of trigger_radius trig_pilot_putdown (radius 34.6, height 128, angles 0 349, zone), inside the landed seaknight. Its only use is nuke_flight :2989, so it never moves. The host hit starts nuke_section_start, player_putting_down_pilot and the 'wounded_putdown' rig. The replicated trigger hit, or the coop putdown_fallback, should start the client's putdown too, with the puppets hidden from player_putting_down_pilot onward."
+   },
+   {
+    "wait": 30,
+    "target": "client",
+    "cmd": "status",
+    "why": "Check that the client is in the nuke ride (nuke_section_start and player_putting_down_pilot set locally) with no script errors and no rescue_timer mission fail. By now nuke_explodes may also be set."
+   }
+  ],
+  "expect_replicated_flags": [
+   "player_near_crash_site",
+   "pilot_taken_from_cockpit",
+   "nuke_section_start",
+   "player_putting_down_pilot"
+  ],
+  "notes": "Tests the cobrastreets pilot rescue -> putdown -> nuke chain with the coop fallbacks pilot_pickup_pull, hide_for, putdown_fallback and hide_between('player_putting_down_pilot'). Start point is 'cobrastreets' (airlift.gsc:318). Do not use 'nuke': it sets pilot_taken_from_cockpit without spawning a pilot (:352), so pilot_pickup_pull returns early. Timing assumptions: the start flight is only about 400 units at speed 10, so the seaknight should have landed and spawned level.cobrapilot about 15 s after the 25 s gameplay wait. If the pilot is not there yet, pilot_pickup_pull waits up to 10 s for it. If the landing turns out slower, add time to step 1, because the pull-out lerp must not start while the player is still on the Mark 19 or being dismounted. Setting pilot_taken_from_cockpit by flag skips the host's real use press. The host still does the pull-out, but only through the coop fallback (in_coop), so a missing host pull-out points at that code. Also flagged directly: player_near_crash_site, a player-local trigger flag that pilot_pickup_pull would set on its own anyway. The step-4 tp must come after the host's pull-out has ended (rig about 9 s plus lerp), or nuke_flight will not be listening yet. putdown_fallback would still re-notify the trigger, but only after nuke_section_start, which this step is what sets. Risk: rescue_timer (90 s from landing) only ends at player_putting_down_pilot. If either copy's putdown is delayed past about 90 s from landing, that copy fails out_of_time, and the coop 'any fail -> all fail' rule fails both. That is a real coop symptom, not a plan error. The tp z (381) is the trigger origin on the seaknight floor, with ground pathnodes nearby at about 366."
+ },
+ {
+  "level": "ambush",
+  "start": "",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline: both instances are in the default (takeover) start, before the briefing/fade sequence."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "flag takeover_fade",
+    "why": "Start the takeover fade-to-black on the host, as takeover_briefing_dialogue would after Price's briefing. takeover_fade() fades in black, hides the HUD and freezes controls after 2 s. aarea_takeover_init moves on to aarea_ambush_init, and ambush_setup waits there on takeover_briefing_done. The flag should replicate to the client about 4 s later, which starts coop hide_between('takeover_fade','takeover_fade_done') there too."
+   },
+   {
+    "wait": 8,
+    "target": "host",
+    "cmd": "flag takeover_briefing_done",
+    "why": "Let ambush_setup run on the host. It teleports the player to player_outofsight and then onto startnodeplayer_ambush, sets takeover_fade_clear (which replicates), re-places the squad and fades back in, and takeover_fade() then sets takeover_fade_done. On the client this exercises takeover_nudge: the client lands on the same node and should be nudged about 40 units aside, logged as 'ambush: nudged aside of ...'. Puppets should be shown again at takeover_fade_done."
+   },
+   {
+    "wait": 14,
+    "target": "client",
+    "cmd": "status",
+    "why": "About 14 s later, the client's fade should be finished (fade-in 4 s plus 4 s, after the ~4 s replication delay). Check that the client is on the ambush hillside, not standing on the host's node, with controls back and no script errors."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "status",
+    "why": "Host status for comparison. It should show the same ambush-phase state (aa_ambush, caravan_on_the_move set by ambush_objective)."
+   }
+  ],
+  "expect_replicated_flags": [
+   "takeover_fade",
+   "takeover_briefing_done",
+   "takeover_fade_clear",
+   "takeover_fade_done"
+  ],
+  "notes": "What this tests: sequence 1 in _coop_lvl_ambush.gsc, the takeover briefing and fade. That covers hide_between(takeover_fade, takeover_fade_done) and takeover_nudge on the non-host, where ambush_setup setorigin's every player onto startnodeplayer_ambush (ambush.gsc 1160-1162). I used the default start (\"\"), not \"ambush\", because start_ambush sets takeover_fade_clear, takeover_fade_done and takeover_briefing_done itself, so the fade and nudge would never run. Both flags I set are flag_init'ed (ambush.gsc 242-243). Setting takeover_fade first and takeover_briefing_done about 8 s later keeps the stock order: the screen is fully black before ambush_setup teleports the player.\n\nSide effects:\n- This skips the takeover fight and briefing. The stock takeover_briefing thread may still be running anim_reach (it waits on takeover_done, which never fires here) and could later set takeover_briefing_done or takeover_fade again. Those flags are already set, so it should be harmless.\n- Leftover takeover AI (checkpoint guys) may still be alive near the checkpoint. That is stock behaviour, not a coop problem.\n\nDeliberately left out:\n- ambush_early_start / ambush_mission_fail: they spring or fail the ambush.\n- player_tower_hits_ground: player-local, and it has convoy prerequisites.\n\nDo not fire any weapon after the fade. Once the convoy reaches caravan_approach, set_flag_on_player_action fails the mission on weapon_fired, for everyone (replicated).\n\nIf the client is not on the node within 3 s of takeover_fade_clear, wait_on_spot gives up and no nudge happens. This can happen if replication of takeover_briefing_done is late. Look for the 'ambush: nudged aside' log line on the client."
+ },
+ {
+  "level": "launchfacility_b",
+  "start": "controlroom",
+  "steps": [
+   {
+    "wait": 5,
+    "target": "host",
+    "cmd": "flag wall_destroyed",
+    "why": "start_controlroom (launchfacility_b.gsc 325-372) puts both players at the control-room wall and threads plant_the_c4. Setting wall_destroyed on the host acts as if the host's C4 went off. The client should get it after about 4 s and run lfb_remote_wall_blow: clear its local c4 with 'clear_c4', then exploder 100, connectpaths, fx/sound/quake, and activate breaching_control_room 1 s later, without script errors. The host has no local c4_detonation either, so it runs the same mirror path."
+   },
+   {
+    "wait": 8,
+    "target": "client",
+    "cmd": "status",
+    "why": "Log the client state once the replicated wall_destroyed has arrived and the mirrored breach and breaching_control_room activation should have run. Look for the 'lfb: wall destroyed by squadmate, mirroring breach' log line."
+   },
+   {
+    "wait": 20,
+    "target": "host",
+    "cmd": "flag codes_uploaded",
+    "why": "Acts as if the host finished the keypad hold-use (local_trigger keyboard_use_trigger). On the client, lfb_codes_uploaded_cleanup should switch keyboard_use_trigger off and swap com_computer_keyboard_obj to com_computer_keyboard. control_room_dialogue (1843-1870) should run on both copies and lead to successful_confirmation and zakhaev_leaving, which starts the big-screen bink (control_room_bigscreen) and kills the countdown timer (endon codes_uploaded)."
+   },
+   {
+    "wait": 30,
+    "target": "client",
+    "cmd": "status",
+    "why": "After the HQ radio chain (about 15-25 s), confirm the client is still alive and its timer has not failed the mission, and that zakhaev_leaving and the bink fired without errors."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "status",
+    "why": "Compare host state with the client's."
+   }
+  ],
+  "expect_replicated_flags": [
+   "wall_destroyed",
+   "codes_uploaded",
+   "successful_confirmation",
+   "zakhaev_leaving"
+  ],
+  "notes": "Start 'controlroom' is described in the source as 'Starts at blowing the wall to the control room'. It sets begin_countdown, walk, move_faster and update_objectives, spawns team2 and threads plant_the_c4, so the C4 sequence is next. No tp is used: the players already start at the controlroom_player entity.\n\nCaveats:\n(1) Because wall_destroyed is set by flag rather than by detonating, the host also takes the coop mirror path (level.coop_lfb_local_blast is false), so stock blow_the_wall() and its radiusdamage never run on either copy. That still tests the remote-mirror code on both instances.\n(2) spawn_telemetry_friendlies and spawn_telemetry_enemies wait on wall_destroyed. If they are threaded under this start, team2 spawners already used by start_controlroom may be spawned again or fail. That is stock behaviour, not coop's fault.\n(3) codes_uploaded is set while the control_room aigroup is still alive. obj_upload_the_abort_codes, which waits for waittill_aigroupcleared, will not mark objective 2 done or call killTimer until enemies die. The timer loop should still stop through endon codes_uploaded (825). Optionally add 'killnear' steps if the objective state matters.\n(4) This plan does not cover the blast door pull (launchtubes start, needs the AI to reach shut_blast_door) or the elevator pull (elevator start, needs Price and Griggs in standing_in_elevator). blast_door_player_clip_on and elevator_player_clip_on are local by the player_ rule and would not replicate, so they need separate runs with real AI progression. successful_confirmation and zakhaev_leaving are set by each copy's own control_room_dialogue as well as replicated."
+ },
+ {
+  "level": "scoutsniper",
+  "start": "field",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline on the host after the field start: initial_setup_done and field are set by start_field (scoutsniper.gsc:4591-4602), and Price is walking field_moveup."
+   },
+   {
+    "wait": 1,
+    "target": "client",
+    "cmd": "status",
+    "why": "Baseline on the client before anything is replicated."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "flag field_spawn",
+    "why": "Acts as if the host reached the field entry. field_spawn is a trigger script_flag in the zone (not flag_init'ed, scoutsniper.gsc:51). On both sims this spawns the field_guard and field_guard2 stealth AI (field_handle_enemys, scoutsniper.gsc:2229-2235), arms field_handle_price_spotted and runs coop field_pull. field_pull should do nothing here because _stealth_spotted is not set."
+   },
+   {
+    "wait": 8,
+    "target": "client",
+    "cmd": "status",
+    "why": "Checks that field_spawn reached the client (about 4 s), that its field guards spawned without script errors, and that it did not show 'Regrouping with Captain MacMillan'."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "flag field_start",
+    "why": "Starts the BMP convoy cinematic: gopath on bmp1-4, guards walking behind the BMPs or on patrol (scoutsniper.gsc:2237-2256). Also starts field_creep_player / field_turn_around logic on both sims."
+   },
+   {
+    "wait": 12,
+    "target": "client",
+    "cmd": "status",
+    "why": "Checks that field_start replicated and the client's convoy and patrols run without errors."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "status",
+    "why": "Final host state, to compare stealth flags. Neither sim should be spotted, because the players stay at the field start behind the convoy."
+   }
+  ],
+  "expect_replicated_flags": [
+   "field_spawn",
+   "field_start"
+  ],
+  "notes": "Why the 'field' start: it puts Price at price_field_start and sets 'field', so field_main is already running when the test begins. The BMP convoy and field-guard spawn are the next big scripted sequence, and the coop module's only level-specific rule, field_pull on field_spawn, is tied to it.\n\nHow the field start limits the test:\n- graveyard_main does not run from 'field' (switch fallthrough, scoutsniper.gsc:180-198), so field_endmission and its price_left_behind fail are never threaded.\n- field_pull's guards should keep it from teleporting the player, because _stealth_spotted is not set. The test checks that no unwanted pull happens. It does not exercise the fail path.\n- To exercise the real pull, you would need the 'graveyard' start, plus host flags field_close_church_door, then _stealth_spotted, then field_spawn. That has to be planned against the graveyard AI and the hind, and unsupervised it is fragile (spotted may clear, or the hind attacks).\n\nEffects on the stock flow:\n- Setting field_spawn and field_start by hand fires them before Price's own triggers (field_price_stop_dynamic, field_price_decide_start). His field_moveup and field_moveup2 then set them again later, which does no harm. But the convoy may start while Price is still walking up, so his creep timing can be off. That is a stock ordering effect, not a coop bug.\n- If a guard on one sim happens to spot its local player, _stealth_spotted replicates by design. Price can then die 10 s later from field_handle_price_spotted (scoutsniper.gsc:1958-1970). Treat that as stock stealth, not a coop failure.\n\nDo not use tp: no zone origin has been checked for this area."
+ },
+ {
+  "level": "launchfacility_a",
+  "start": "gate",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline. start_gate() runs AA_gate_init() and sets bmp_02_destroyed 0.5 s in on both machines, so gate_player_participation has already passed its flag_clear (1225). The coop gate_ent_seed should have seeded level.ent from the reached_right_gate spawner on both machines."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "flag player_reached_kill_max",
+    "why": "Pretends the host reached the gate kill quota (player_kill_counter 3108-3119). The module marks this flag shared_flag (otherwise it would stay local because the name contains player_), so it should replicate. On both machines gate_player_participation should then turn on the reached_right_gate_additional triggers."
+   },
+   {
+    "wait": 6,
+    "target": "client",
+    "cmd": "status",
+    "why": "Check that player_reached_kill_max reached the client (replication takes about 4 s) and that nothing errored."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "flag gate_sequence_starting",
+    "why": "Starts the gate cinematic, as if the host hit a gate trigger. gate_sequence (1276-1289) runs level.ent stalingradspawn(), which only works because coop pre-seeded level.ent (no trigger was hit on either machine). The replicated flag starts the same sequence on the client: the gate marine walks to node_gate_destroy, plants C4, retreats, then sets blow_the_gate, which fires exploder 500 and opens the tarmac."
+   },
+   {
+    "wait": 30,
+    "target": "client",
+    "cmd": "status",
+    "why": "Give the C4 plant anim, retreat and dialogue time to finish. Then check that blow_the_gate (set natively on each machine or replicated from the host) and aa_tarmac_bmp01_section happened on the client without script errors."
+   }
+  ],
+  "expect_replicated_flags": [
+   "player_reached_kill_max",
+   "gate_sequence_starting",
+   "blow_the_gate"
+  ],
+  "notes": "Sequence under test: the gate breach (coop header items 3 and 7, plus the gate_ent_seed and shared_flag rules). Without coop, setting gate_sequence_starting with no gate trigger hit would hit assertEx(isdefined(level.ent)) at line 1285. The test relies on gate_ent_seed (which runs on both machines when in_coop) to pre-seed level.ent, so a level.ent assert on either machine means that seed failed. That is a coop bug, not a stock-flow problem. Each machine spawns its own gate marine from the same spawner, so the two runs are independent and blow_the_gate may fire a few seconds apart. Whichever machine is first replicates it to the other, and the other machine's later native flag_set is harmless. player_kill_counter is still counting kills on both machines and may set player_reached_kill_max again, which is harmless. No teleports were used because the gate cinematic is not tied to the player's position: friendly_blows_gate uses node_gate_destroy and gate_explosives on its own. Possible follow-up tests: start \"container\" and set flanking_wall_breached on the host to check wall_c4_sync, and start \"vents\" to check the rappel. The rappel needs a real trig_rappel use, so it is not a good fit for flag-only steps."
+ },
+ {
+  "level": "icbm",
+  "start": "tower",
+  "steps": [
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline on the host after the tower start. tower_start (icbm.gsc:815) has already threaded flyover_to_tower_handler, so tower.multiple_c4 is set and both charges are waiting to be planted."
+   },
+   {
+    "wait": 0,
+    "target": "client",
+    "cmd": "status",
+    "why": "Baseline on the client. It should be in the same state: flyover handler running, no c4_in_place received yet."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "tp 711.1 -16097.5 108 60",
+    "why": "Moves the host to script_origin 'obj_get_clear' (zone entity string), the stock 'get to a safe distance' objective point. It is about 1070 units from the tower origin (-64 -16832 112), well outside towerBlastRadius 384 (icbm.gsc:71) for the radiusDamage of 1000 in the collapse (icbm_code.gsc:1500). tower_start (356 -17231) is only about 580 units away, so this is a safety margin."
+   },
+   {
+    "wait": 0,
+    "target": "client",
+    "cmd": "tp 711.1 -16097.5 108 60",
+    "why": "Same safe spot for the client, so the replicated collapse cannot kill the client player."
+   },
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "flag tower_destroyed",
+    "why": "Simulates a squadmate blowing the tower. This fires _coop_lvl_icbm tower_c4_sync on the host: no local detonation, so it sends the 2 missing c4_in_place notifies (giving c4_planted and c4_set), then clear_c4, then c4_detonation. That resumes flyover_to_tower_handler (music_endon_tower_collapse, lights_off). The flag-gated collapse in icbm_code.gsc:1488 runs. About 4 s later the flag replicates and the client must take the same path."
+   },
+   {
+    "wait": 8,
+    "target": "client",
+    "cmd": "status",
+    "why": "About 8 s after the flag: the client should have received tower_destroyed, logged 'icbm: tower blown by squadmate, clearing local charges' plus 2x 'plant replay missing', and have c4_planted and lights_off set. The tower model should show as destroyed."
+   },
+   {
+    "wait": 0,
+    "target": "host",
+    "cmd": "status",
+    "why": "Host comparison: c4_planted, lights_off and music_endon_tower_collapse set, and no script errors from clear_c4/remove_detonator with no charges in hand."
+   },
+   {
+    "wait": 25,
+    "target": "client",
+    "cmd": "status",
+    "why": "After c4_set's dialog chain (about 20 s) both machines should reach flag_set('tower_blown') (icbm.gsc:958) and thread fense_to_base_handler. This proves that the stock flow continues past the tower on the client."
+   }
+  ],
+  "expect_replicated_flags": [
+   "tower_destroyed",
+   "c4_planted",
+   "music_endon_tower_collapse",
+   "lights_off",
+   "tower_blown"
+  ],
+  "notes": "Target sequence: the power tower C4 / collapse (coop rule 5, tower_c4_sync in _coop_lvl_icbm.gsc). With the \"tower\" start, flyover_to_tower_handler runs right away on both instances. Neither player plants or detonates, so setting \"tower_destroyed\" on the host is the most direct test of the coop rule. It acts on BOTH machines because tower_c4_sync runs in coop on the host too: neither tower ever got a local detonation. Each machine should send its own missing c4_in_place notifies. c4_planted, lights_off and tower_blown may be set locally on each machine before replication arrives, so having them on both is the pass condition, whichever came first. The lights flags also flip: lights_off is set 2 s after detonation, then lights_on/lights_off are flipped again near tower_blown (icbm.gsc:962). tower_start also sets griggs_loose, which arms griggs_sync. That thread then waits forever on breach_started, which this start never sets. This is harmless and expected. Coordinates: the tp target is the 'obj_get_clear' script_origin from the zone entity string; z 108 is its origin, near ground level (nearby pathnodes are at z 91-92). If the teleport ends slightly in the air, the player just drops. A possible false failure that is not coop's fault: c4_set's dialog uses level.griggs/level.price anim_single_queue. If tower_start_spawners do not define them on one instance, that would be a stock start-point issue. Alternative secondary test (not included, to keep it short): the \"base2\"/\"launch\" start for the lift_off pull_to_buddy rule. But launch_start already sets lift_off itself, so it would not exercise replication."
+ },
+ {
+  "level": "jeepride",
+  "start": "bridge_zak",
+  "steps": [
+   {
+    "wait": 0,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline. The bridge_zak start (jeepride.gsc:1047-1071) sets end_ride/bridge_sequence/van_smash on both copies, spawns hind group 70 into level.hind and calls bridge_zakhaev() by itself about 4.5 s in. So by now both copies should be in the tanker blast / topple / Zakhaev scene, and coop's jr_hide_between('bridge_zakhaev_setup', undefined) should have hidden the puppets."
+   },
+   {
+    "wait": 1,
+    "target": "client",
+    "cmd": "status",
+    "why": "Checks that the client got into the same scene (linked to its own playerview rig at player_drag_node) without script errors, and that its puppet is hidden."
+   },
+   {
+    "wait": 100,
+    "target": "host",
+    "cmd": "killnear",
+    "why": "Waits through hind_shoots_the_tanker plus the slow-mo series (bridge_zak_slomo_script_timed, about 41 s of game time at 0.25-0.8x speed, so roughly 90 s of real time) until the player gets colt45_zak_killer at 'start_end'. Then the host kills an end-scene bad guy, as a player would."
+   },
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "flag all_end_scene_guys_dead",
+    "why": "Fallback: the host acts as if it finished the shoot-out (normally bridge_zak_guys_dead sets this, jeepride.gsc:2223-2227; the flag is flag_init'ed at jeepride.gsc:319). Coop replicates it, so the client should end its own shoot-out and both copies should go on to rescue_choppers / music_lastman / slomo_done -> bridge_rescue."
+   },
+   {
+    "wait": 10,
+    "target": "client",
+    "cmd": "status",
+    "why": "About 4 s for replication plus margin. Checks that the client received all_end_scene_guys_dead and moved into bridge_rescue (the CPR / drag rig) with no script error, such as the level.medic assert at jeepride.gsc:1759."
+   }
+  ],
+  "expect_replicated_flags": [
+   "all_end_scene_guys_dead"
+  ],
+  "notes": "Why this start point: bridge_zak plays the level's main cinematic (header sequence 5: tanker blast, topple, Zakhaev execution, slow-mo shoot-out, rescue) natively on both copies, and stock code builds level.hind for it. I chose it over bridge_combat plus 'flag end_action_bmp' / 'flag end_action_hind' because setting end_action_hind by hand skips end_hind_action() (jeepride.gsc:1159-1163), which is the only place level.hind is assigned on that path. end_action() -> bridge_zakhaev() -> hind_shoots_the_tanker() then reads level.hind (jeepride.gsc:2383) and errors on undefined. That would be a stock-flow break, not a coop fault, so the plan does not use those flags.\n\nTiming: the 100 s wait assumes the driver's waits are wall-clock while the slow-mo series runs at reduced timescale. If the colt is not in hand yet, killnear does nothing harmful. If the gun comes earlier, the flag simply lets the scene continue after the 'end' notetrack.\n\nSetting all_end_scene_guys_dead while some end-scene enemies are still alive is a deliberate shortcut. Leftover enemies on either copy are expected, not a coop bug. The flag is the same one either player's last kill would set, and the coop header calls it replicated on purpose.\n\nThere are no tp steps, because both players are already placed by the start (zak_player_spot) and then linked to the rig. The level end (nextmission after bridge_rescue) is driven by the host and may follow if the run continues.\n\nFiles checked: C:/Users/got/Downloads/Call.of.Duty.4.Modern.Warfare/cod4-coop/mod/maps/_coop_lvl_jeepride.gsc and C:/Users/got/cod4-decomp/raw/maps/jeepride.gsc."
+ },
+ {
+  "level": "airplane",
+  "start": "vip",
+  "steps": [
+   {
+    "wait": 2,
+    "target": "host",
+    "cmd": "status",
+    "why": "Baseline. With the vip start, the short fade-in (airplane.gsc 318-328) sets intro_fade_in_complete locally on each copy, and initFriendlies (2416-2418) warps each player to the vip nodePlayer. Check that both copies are out of the intro hide and that the client was stepped back (ap_intro / ap_spread_back)."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "tp -502 527 322 180",
+    "why": "Put the host inside the radiant trigger_multiple (model *24, origin -502 527 334, targetname flag_set, script_flag player_approach_human_shield). Z is lowered to about floor height (nearby pathnodes are at z 318), and yaw 180 matches org_humanshield_playerview (angles 0 180 0). This fires the real trigger. The flag is a local 'player_' flag, so it only reaches the client through the trigger-hit replay, which is the path coop uses in real play. A plain 'flag player_approach_human_shield' would not replicate. Expect humanshield() (824-844) to run on both copies: actors spawn, human_shield_starting is set, slow-mo and hostage_timer(5) start."
+   },
+   {
+    "wait": 3,
+    "target": "host",
+    "cmd": "killnear",
+    "why": "The host takes the shot while the slow-mo standoff runs (player_looking_at_human_shield is set 0.5 s after the start, and hostage_timer is 5 s of game time). kill_ai() has already cleared other enemies, so the nearest enemy should be level.terrorist. If killnear does damage without a hit location, it takes the wounded branch (terrorist_wounded, then human_shield_over). The client should not get a remote K| (ap_no_remote_kill). It should mirror the outcome through ap_shield_mirror (damage notify on torso_upper, with the terrorist_wounded flag lowered and then restored) and play its own pain/breakfree animations. The client should also not get the 'hostage timer expired' fail."
+   },
+   {
+    "wait": 6,
+    "target": "client",
+    "cmd": "status",
+    "why": "Check the client after the ~4 s replication delay. Expect: human_shield_starting set (by its own replayed trigger), terrorist_wounded or terrorist_killed set, human_shield_over set by its own pain monitor, restore_timescale set, and the timescale back to normal. Look for the log line 'airplane: mirroring human shield outcome', no script errors, and no mission fail. If the client was more than 400 units from -584 544 272, also expect 'airplane: pulled to human shield'."
+   },
+   {
+    "wait": 1,
+    "target": "host",
+    "cmd": "status",
+    "why": "Check the host after the sequence: human_shield_over and obj_rescue_vip_complete are set, and no fail state."
+   }
+  ],
+  "expect_replicated_flags": [
+   "human_shield_starting",
+   "human_shield_actors_spawned",
+   "terrorist_wounded",
+   "human_shield_over",
+   "restore_timescale",
+   "obj_rescue_vip_complete"
+  ],
+  "notes": "Why I picked this: the vip start (airplane.gsc 180-184, AA_vip_init 742-751) is right before the human shield cinematic. That is the most coop-sensitive scene in _coop_lvl_airplane.gsc, with the shield pull, the no-remote-kill rule for the actors and the mirroring of the outcome.\n\nThe scene is started with a teleport into the real trigger, not a flag command. player_approach_human_shield is not in the gsc's flag_init list. It is a radiant trigger flag (zone entity: trigger_multiple *24 at -502 527 334, script_flag player_approach_human_shield). Under the coop \"player_\" convention it is local and reaches squadmates only through the trigger-hit replay. If the tp lands outside the brush (z guessed from nearby pathnodes at 318), the fallback is to send 'flag player_approach_human_shield' to BOTH the host and the client. That only simulates the replay, so it is a weaker test.\n\nSetting human_shield_starting or terrorist_* directly is not a good idea. On a copy whose humanshield() never ran, there is no level.terrorist, so the result would not be coop's fault.\n\nkillnear outcome: if it applies damage with no hit location, expect terrorist_wounded. If it uses a headshot, expect terrorist_killed. Either should mirror. Run on a skill below Veteran, because the wounded branch fails the mission on Veteran (mission_failed_veteran_no_headshot, 1155).\n\nHostage timer risk: it is 5 s of game time under 0.3 slow-mo. If the replicated outcome reaches the client late and its timer runs out first, hostage_timer_expired / mission_failed_out_of_time would fire. That would be a real coop timing finding.\n\nThe pull (more than 400 units from org_humanshield_playerview at -584 544 272) only triggers if the client's vip nodePlayer is far from there. That spot comes from the zone and is not checked, so the pull log line may not show up.\n\nFreefall is not driven here. It needs exit_door_blown, which the friendlies' scripted flow sets after human_shield_over, and the player_jumped_out / trig_exit_door chain. A second plan could use start 'freefall' and tp the host into trig_exit_door (origin -1088 388 320) after exit_door_blown, to test ap_exit_jump_follow and the local white_done / plane_explodes chain.\n\nFiles read (not edited): C:/Users/got/Downloads/Call.of.Duty.4.Modern.Warfare/cod4-coop/mod/maps/_coop_lvl_airplane.gsc, C:/Users/got/cod4-decomp/raw/maps/airplane.gsc, C:/Users/got/cod4-decomp/raw/_zones/airplane.ff.zone."
+ }
+]
