@@ -80,7 +80,7 @@ postinit()
 	build_trigger_ids();
 	build_ai_ids();
 
-	openfile( "coop", "level", level.script, getdvar( "start" ) ); // level + start point; may start the load barrier
+	openfile( "coop", "level", level.script, getdvar( "start" ), getdvarint( "g_gameskill" ) ); // level + start point; may start the load barrier
 	if ( openfile( "coop", "barrier" ) )
 		thread barrier_hud();
 
@@ -171,7 +171,7 @@ net_loop()
 		if ( c.hb % 100 == 0 && getdvar( "coop_heartbeat" ) == "1" )
 			for ( ps = 0; ps < c.max; ps++ )
 				if ( isdefined( c.puppets[ ps ] ) )
-					log( "  puppet " + ps + " attach " + c.puppets[ ps ] getattachsize() + " weapon '" + c.puppets[ ps ].coop_weapon + "' model '" + puppet_weapon_model( c.puppets[ ps ] ) + "' remote '" + c.remote_weapon[ ps ] + "' at " + c.puppets[ ps ].origin + " net " + ( fgetarg( ps, 0 ), fgetarg( ps, 1 ), fgetarg( ps, 2 ) ) + " hidden " + c.puppets[ ps ].coop_hidden + " anim " + c.puppets[ ps ].coop_anim + " flags " + fgetarg( ps, 5 ) );
+					log( "  puppet " + ps + " attach " + c.puppets[ ps ] getattachsize() + " weapon '" + c.puppets[ ps ].coop_weapon + "' model '" + puppet_weapon_model( c.puppets[ ps ] ) + "' remote '" + coop_str( c.remote_weapon[ ps ] ) + "' at " + c.puppets[ ps ].origin + " net " + ( fgetarg( ps, 0 ), fgetarg( ps, 1 ), fgetarg( ps, 2 ) ) + " hidden " + c.puppets[ ps ].coop_hidden + " anim " + c.puppets[ ps ].coop_anim + " flags " + fgetarg( ps, 5 ) );
 		wait 0.05;
 	}
 }
@@ -259,6 +259,13 @@ test_command()
 				ids++;
 		log( "status axis=" + ai.size + " with_id=" + ids + " health=" + level.player.health + " down=" + level.coop.down );
 	}
+}
+
+coop_str( v )
+{
+	if ( !isdefined( v ) )
+		return "";
+	return v;
 }
 
 puppet_weapon_model( p )
@@ -358,10 +365,13 @@ track_shots()
 track_weapon()
 {
 	last = "";
+	ticks = 0;
 	for ( ;; )
 	{
 		w = level.player getcurrentweapon();
-		if ( isdefined( w ) && w != last && w != "none" )
+		ticks++;
+		// on change, and every 5 s (an early announcement can be lost while the other side loads)
+		if ( isdefined( w ) && w != "none" && ( w != last || ticks % 20 == 0 ) )
 		{
 			last = w;
 			send( "W|" + w );
@@ -653,8 +663,8 @@ watch_event_trigger()
 local_trigger_hit( t, n )
 {
 	c = level.coop;
-	if ( isdefined( t.coop_local ) || isdefined( c.trig_done[ n ] ) )
-		return; // level module marked it player-local (kill volumes, hints...), or already replayed
+	if ( isdefined( t.coop_local ) || isdefined( c.trig_done[ n ] ) || isdefined( t.ambient ) )
+		return; // player-local (module-marked, or an ambient sound zone), or already replayed
 	now = gettime();
 	if ( isdefined( c.trig_last[ n ] ) && now - c.trig_last[ n ] < 1000 )
 		return; // includes our own replay of a remote hit this frame
@@ -671,8 +681,8 @@ ev_trigger( slot, tok )
 	t = getentbynum( n );
 	if ( !isdefined( t ) || !isdefined( t.classname ) || getsubstr( t.classname, 0, 8 ) != "trigger_" )
 		return;
-	if ( isdefined( t.coop_local ) || isdefined( c.trig_done[ n ] ) )
-		return;
+	if ( isdefined( t.coop_local ) || isdefined( c.trig_done[ n ] ) || isdefined( t.ambient ) )
+		return; // ambient zones assume the local player is inside the volume (_ambient.gsc)
 	now = gettime();
 	if ( isdefined( c.trig_last[ n ] ) && now - c.trig_last[ n ] < 1000 )
 		return; // we hit it ourselves a moment ago

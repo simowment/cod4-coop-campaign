@@ -131,7 +131,7 @@ turret_unhide()
 {
 	waittillframeend;
 	if ( isdefined( level.flag[ "player_gets_off_turret" ] ) )
-		flag_wait( "player_gets_off_turret" );
+		safe_flag_wait( "player_gets_off_turret" );
 	level.coop.hide_count--;
 }
 
@@ -161,7 +161,7 @@ local_flag_trigger( flagName )
 // both players rappel from the same node on their own rigs
 rappel_hide()
 {
-	flag_wait( "player_rappels" );
+	safe_flag_wait( "player_rappels" );
 	level.coop.hide_count++;
 	wait 2;
 	if ( isdefined( level.flag[ "heli_moves_on" ] ) )
@@ -174,11 +174,11 @@ rappel_hide()
 // partner rappelled (apartment_explosion replicated) but our rappel_trigger never saw the replayed hit
 rappel_straggler()
 {
-	flag_wait( "apartment_explosion" );
+	safe_flag_wait( "apartment_explosion" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	waittillframeend;
-	if ( flag( "player_rappels" ) )
+	if ( safe_flag( "player_rappels" ) )
 		return;
 	trig = getent( "rappel_trigger", "targetname" );
 	if ( !isdefined( trig ) )

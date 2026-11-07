@@ -50,7 +50,7 @@
 //    "badguy_village" noteworthies, "badguy_runby", "badguy_apartment" targetnames) are therefore
 //    taken out of remote-kill sync (no_remote_kill); each machine's script ends him itself. A player
 //    who shoots him still fails locally, and that fail is replicated.
-// 9. Level end: flag_wait( "mission_done" ) -> nextmission (aarea_apartment_init 2342-2346),
+// 9. Level end: safe_flag_wait( "mission_done" ) -> nextmission (aarea_apartment_init 2342-2346),
 //    host-driven by the framework.
 
 #include maps\_utility;
@@ -106,7 +106,7 @@ coop_unregister_ai()
 // ambush_setup (1160-1162) puts every player on startnodeplayer_ambush while the screen is black
 takeover_nudge()
 {
-	flag_wait( "takeover_fade_clear" );
+	safe_flag_wait( "takeover_fade_clear" );
 	if ( !maps\_coop::in_coop() || level.coop.ishost )
 		return;
 	node = getnode( "startnodeplayer_ambush", "targetname" );
@@ -120,7 +120,7 @@ takeover_nudge()
 // ambush_tower_blackout (1455-1515): teleport to a fixed spot, ~21s frozen prone
 tower_blackout_coop()
 {
-	flag_wait( "player_tower_hits_ground" ); // player-local: our own tower landed
+	safe_flag_wait( "player_tower_hits_ground" ); // player-local: our own tower landed
 	level.coop.hide_count++;
 	start = gettime();
 	spot = ( -439, -197, 9 );

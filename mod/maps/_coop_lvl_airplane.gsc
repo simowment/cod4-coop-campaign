@@ -40,7 +40,7 @@
 //    flags arrives and the local terrorist is alive and was never hit locally (own damage watcher),
 //    send the matching damage notify (j_head for killed, torso_upper for wounded) to it, after its
 //    pain monitor is running (a late copy may spawn the pair after the flag arrived). The monitor's
-//    wounded branch is gated on !flag( "terrorist_wounded" ), which the replicated flag has already
+//    wounded branch is gated on !safe_flag( "terrorist_wounded" ), which the replicated flag has already
 //    set, so for the wounded mirror the flag value is lowered (raw level.flag, no notify, no
 //    replication) for the duration of the notify and restored afterwards.
 //
@@ -115,7 +115,7 @@ ap_intro()
 {
 	ap_wait_flag_exists( "intro_fade_in_complete" );
 	hide_between( undefined, "intro_fade_in_complete" );
-	flag_wait( "intro_fade_in_complete" );
+	safe_flag_wait( "intro_fade_in_complete" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	level.coop.hide_count++;
@@ -164,13 +164,13 @@ ap_spread_back()
 ap_shield_pull()
 {
 	ap_wait_flag_exists( "human_shield_starting" );
-	flag_wait( "human_shield_starting" );
+	safe_flag_wait( "human_shield_starting" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	if ( !isdefined( level.coop_ap_shield_pos ) )
 		return;
 	wait 1; // the playerview lerp (0.5 s) is over and the playerview is deleted
-	if ( flag( "human_shield_over" ) )
+	if ( safe_flag( "human_shield_over" ) )
 		return;
 	pos = level.coop_ap_shield_pos;
 	if ( distance( level.player.origin, pos ) <= 400 )
@@ -184,7 +184,7 @@ ap_shield_pull()
 ap_shield_actors()
 {
 	ap_wait_flag_exists( "player_approach_human_shield" );
-	flag_wait( "player_approach_human_shield" );
+	safe_flag_wait( "player_approach_human_shield" );
 	waittillframeend;
 	if ( isdefined( level.terrorist ) )
 	{
@@ -239,13 +239,13 @@ ap_shield_mirror()
 		return; // this copy already played its own branch
 	t.coop_mirrored = true;
 	maps\_coop::log( "airplane: mirroring human shield outcome" );
-	if ( flag( "terrorist_killed" ) )
+	if ( safe_flag( "terrorist_killed" ) )
 	{
 		// same argument list human_shield_pain_monitor waits for
 		t notify( "damage", 50, level.player, ( 1, 0, 0 ), t.origin, "MOD_PISTOL_BULLET", "", "", "j_head", 0 );
 		return;
 	}
-	// the wounded branch requires !flag( "terrorist_wounded" ): lower it without notify / replication
+	// the wounded branch requires !safe_flag( "terrorist_wounded" ): lower it without notify / replication
 	level.flag[ "terrorist_wounded" ] = false;
 	t notify( "damage", 50, level.player, ( 1, 0, 0 ), t.origin, "MOD_PISTOL_BULLET", "", "", "torso_upper", 0 );
 	waittillframeend;
@@ -259,8 +259,8 @@ ap_shield_mirror()
 ap_exit_jump_report()
 {
 	ap_wait_flag_exists( "player_jumped_out" );
-	flag_wait( "player_jumped_out" );
-	if ( !flag( "coop_airplane_exit_jump" ) )
+	safe_flag_wait( "player_jumped_out" );
+	if ( !safe_flag( "coop_airplane_exit_jump" ) )
 		flag_set( "coop_airplane_exit_jump" );
 }
 
@@ -268,10 +268,10 @@ ap_exit_jump_follow()
 {
 	ap_wait_flag_exists( "player_jumped_out" );
 	ap_wait_flag_exists( "exit_door_blown" );
-	flag_wait( "coop_airplane_exit_jump" );
+	safe_flag_wait( "coop_airplane_exit_jump" );
 	if ( !maps\_coop::in_coop() )
 		return;
-	flag_wait( "exit_door_blown" );
+	safe_flag_wait( "exit_door_blown" );
 	trig = getent( "trig_exit_door", "targetname" );
 	if ( !isdefined( trig ) )
 		return;
@@ -279,7 +279,7 @@ ap_exit_jump_follow()
 	// have both happened locally, so keep nudging it for a while
 	for ( i = 0; i < 40; i++ )
 	{
-		if ( flag( "player_jumped_out" ) )
+		if ( safe_flag( "player_jumped_out" ) )
 			return;
 		trig.coop_remote_time = gettime(); // our own nudge: _coop must not send it back out
 		trig notify( "trigger", level.player );

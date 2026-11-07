@@ -113,6 +113,14 @@ hide_between_proc( startFlag, endFlag )
 	}
 }
 
+// flag() that is false (instead of a runtime error) for a flag not flag_init'ed yet
+safe_flag( name )
+{
+	if ( !isdefined( level.flag ) || !isdefined( level.flag[ name ] ) )
+		return false;
+	return level.flag[ name ];
+}
+
 // flag_wait that tolerates a flag which is flag_init'ed later (or by another start point)
 safe_flag_wait( name )
 {

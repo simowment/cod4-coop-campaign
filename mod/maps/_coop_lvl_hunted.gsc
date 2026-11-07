@@ -78,7 +78,7 @@ main()
 
 basement_straggler()
 {
-	flag_wait( "squad_in_basement" );
+	safe_flag_wait( "squad_in_basement" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	if ( level.start_point == "basement" )
@@ -103,7 +103,7 @@ player_in_basement()
 // on whichever machine the greenhouse helicopter is shot down, tell the others
 heli_death_watch()
 {
-	flag_wait( "road_helicopter_cleared" );
+	safe_flag_wait( "road_helicopter_cleared" );
 	// start_greenhouse sets the flag before start_greenhouse_helicopter assigns level.helicopter
 	// (hunted.gsc:4172-4195), so give it a moment
 	for ( i = 0; i < 40 && !isdefined( level.helicopter ); i++ )
@@ -114,13 +114,13 @@ heli_death_watch()
 	heli waittill( "death" );
 	if ( !isdefined( heli ) )
 		return; // deleted by script, not shot down
-	if ( !flag( "coop_hunted_heli_dead" ) )
+	if ( !safe_flag( "coop_hunted_heli_dead" ) )
 		flag_set( "coop_hunted_heli_dead" );
 }
 
 heli_death_apply()
 {
-	flag_wait( "coop_hunted_heli_dead" );
+	safe_flag_wait( "coop_hunted_heli_dead" );
 	heli = level.helicopter;
 	if ( !isdefined( heli ) || !isalive( heli ) )
 		return;
@@ -147,7 +147,7 @@ door_straggler( flagName, doorName, aheadName )
 door_straggler_proc( flagName, doorPos, ahead )
 {
 	aheadPos = ahead.origin;
-	flag_wait( flagName );
+	safe_flag_wait( flagName );
 	if ( !maps\_coop::in_coop() )
 		return;
 	// the player who set the flag is standing in the trigger: a wide trigger brush can put him

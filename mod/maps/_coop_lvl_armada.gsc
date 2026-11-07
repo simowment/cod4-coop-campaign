@@ -55,7 +55,7 @@ main()
 	armada_local_ambient( "trigger_multiple" );
 	armada_local_ambient( "trigger_radius" );
 
-	// the flag-gated helpers flag_wait() at once, but armada.gsc flag_init()s its flags only after
+	// the flag-gated helpers safe_flag_wait() at once, but armada.gsc flag_init()s its flags only after
 	// _load (and our postinit) returned, so they are started once the flags exist
 	level thread armada_scenes();
 }

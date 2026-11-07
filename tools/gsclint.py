@@ -113,6 +113,12 @@ def lint(path, res, builtins):
         if re.search(r'\bthread\s*$', st) or re.search(r'\bthread\s*;', st):
             errs.append('%s:%d: dangling thread keyword' % (path, ln))
         depth += line.count('{') - line.count('}')
+    # level modules run before the level's own flag_init calls: plain flag()/flag_wait() on a flag that
+    # does not exist yet is a fatal runtime error. Modules must use safe_flag()/safe_flag_wait().
+    if os.path.basename(path).startswith('_coop_lvl_'):
+        for ln, line in enumerate(lines, 1):
+            if re.search(r'(?<![A-Za-z0-9_:])flag(_wait)?\(', line):
+                errs.append('%s:%d: use safe_flag()/safe_flag_wait() in level modules' % (path, ln))
     # reserved globals cannot be assigned as locals ("bad syntax" at compile)
     for ln, line in enumerate(lines, 1):
         m = re.match(r'^\s*(anim|level|game|self)\s*=[^=]', line)

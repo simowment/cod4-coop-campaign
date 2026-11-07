@@ -131,7 +131,7 @@ clacker_exploded_flag( noteworthy )
 clacker_remote_use( trig, f )
 {
 	self endon( "death" );
-	flag_wait( f );
+	safe_flag_wait( f );
 	waittillframeend; // a local clacker_fire deletes its trigger in the frame it sets the flag
 	if ( !isdefined( trig ) || !isdefined( self ) )
 		return; // used on this machine
@@ -140,7 +140,7 @@ clacker_remote_use( trig, f )
 	maps\_coop::log( "village_defend: remote detonation " + f );
 
 	useVolume = getent( self.script_noteworthy, "targetname" );
-	if ( isdefined( useVolume ) && flag( "got_the_clacker" ) && level.player istouching( useVolume ) )
+	if ( isdefined( useVolume ) && safe_flag( "got_the_clacker" ) && level.player istouching( useVolume ) )
 	{
 		// we are holding this very detonator: put it away like clacker_disable (2826-2850)
 		level notify( "detclacker_disarm" );
@@ -183,7 +183,7 @@ clacker_remote_use( trig, f )
 
 	// reprint objective 5 with the remaining detonators (clacker_fire 2905-2932), only while this sim's
 	// objectives() thread has it up (added at 3508 after objective_detonators, done at 3524)
-	if ( flag( "objective_detonators" ) && !flag( "objective_armor_arrival" ) )
+	if ( safe_flag( "objective_detonators" ) && !safe_flag( "objective_armor_arrival" ) )
 	{
 		objective_delete( 5 );
 		objective_add( 5, "active", &"VILLAGE_DEFEND_USE_THE_DETONATORS_IN1" );
@@ -199,9 +199,9 @@ clacker_remote_use( trig, f )
 	level.objectiveClackers--;
 	if ( level.objectiveClackers > 0 )
 		return;
-	if ( !flag( "fall_back_to_barn" ) )
+	if ( !safe_flag( "fall_back_to_barn" ) )
 		flag_set( "fall_back_to_barn" );
-	if ( isdefined( level.flag[ "barn_assault_begins" ] ) && !flag( "barn_assault_begins" ) )
+	if ( isdefined( level.flag[ "barn_assault_begins" ] ) && !safe_flag( "barn_assault_begins" ) )
 		flag_set( "barn_assault_begins" ); // inited by _load from the barn_helidrop script_flag_true
 	autosave_by_name( "clackers_all_used_up" );
 	if ( isdefined( level.coop_fn_tavern_storming_delay ) )

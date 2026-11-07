@@ -86,7 +86,7 @@ def main():
         except PermissionError:
             print('WARNING: d3d9.dll is in use (game running?) - proxy not updated')
     for fn in os.listdir(os.path.join(ROOT, 'launcher')):
-        if fn.endswith('.bat'):
+        if fn.endswith('.bat') or fn.endswith('.ps1'):
             txt = open(os.path.join(ROOT, 'launcher', fn), encoding='utf-8').read().replace('\r\n', '\n')
             with open(os.path.join(a.game, fn), 'w', encoding='utf-8', newline='\r\n') as f:
                 f.write(txt)  # cmd.exe wants CRLF

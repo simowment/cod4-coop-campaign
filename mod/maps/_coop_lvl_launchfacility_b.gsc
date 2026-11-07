@@ -76,7 +76,7 @@ lfb_wait_flag_exists( name )
 lfb_blast_door_pull()
 {
 	lfb_wait_flag_exists( "blast_door_player_clip_on" );
-	flag_wait( "blast_door_player_clip_on" );
+	safe_flag_wait( "blast_door_player_clip_on" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	vol = getent( "shut_blast_door", "targetname" );
@@ -105,7 +105,7 @@ lfb_watch_local_detonation()
 lfb_remote_wall_blow()
 {
 	lfb_wait_flag_exists( "wall_destroyed" );
-	flag_wait( "wall_destroyed" );
+	safe_flag_wait( "wall_destroyed" );
 	// on the detonating copy, plant_the_c4's blow_the_wall() may set the flag before our
 	// c4_detonation watcher has resumed: let every thread of this frame run first
 	waittillframeend;
@@ -161,15 +161,15 @@ lfb_clear_local_c4()
 lfb_codes_uploaded_cleanup()
 {
 	lfb_wait_flag_exists( "codes_uploaded" );
-	flag_wait( "codes_uploaded" );
+	safe_flag_wait( "codes_uploaded" );
 	// upload_codes() on this copy may still be waiting for its aigroup and then trigger_on() the
 	// keypad and spawn the _obj model later (1726-1737). Keep it retired until the level is over.
 	// The uploader's copy clears these local aa_ section flags (1800-1801); do the same here.
-	if ( flag( "aa_countdown_started" ) )
+	if ( safe_flag( "aa_countdown_started" ) )
 		flag_clear( "aa_countdown_started" );
-	if ( flag( "aa_upload_them_codes" ) )
+	if ( safe_flag( "aa_upload_them_codes" ) )
 		flag_clear( "aa_upload_them_codes" );
-	while ( !flag( "at_the_jeep" ) )
+	while ( !safe_flag( "at_the_jeep" ) )
 	{
 		trig = getent( "keyboard_use_trigger", "targetname" );
 		if ( isdefined( trig ) && !isdefined( trig.trigger_off ) )
@@ -191,7 +191,7 @@ lfb_codes_uploaded_cleanup()
 lfb_elevator_pull()
 {
 	lfb_wait_flag_exists( "elevator_player_clip_on" );
-	flag_wait( "elevator_player_clip_on" );
+	safe_flag_wait( "elevator_player_clip_on" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	vol = getent( "standing_in_elevator", "targetname" );

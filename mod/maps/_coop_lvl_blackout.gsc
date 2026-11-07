@@ -26,7 +26,7 @@
 //    set by each machine's own player_rappel_think, blackout_code.gsc:2056/2072).
 //
 //  * Rappel point (blackout_code.gsc:1942-1945 ally_rappels): the allies only set gaz_rappels and
-//    start their own rappel after flag_wait( "player_at_rappel" ), a flag_set_touching flag
+//    start their own rappel after safe_flag_wait( "player_at_rappel" ), a flag_set_touching flag
 //    (player_-prefixed, local). gaz_rappels itself is replicated, so on the squadmate's machine the
 //    rope is enabled and the rappel is replayed, but its allies would stay stuck at the top waiting
 //    for its own player to stand in that volume. -> LATCHED (see below): the first player at the
@@ -93,7 +93,7 @@ main()
 	blackout_local_by_flag( "flag_set_touching", "tv_movie" );
 	blackout_local_by_flag( "flag_set_touching", "player_near_heli" );
 
-	// the flag-gated helpers flag_wait() at once, but blackout.gsc flag_init()s its flags only after
+	// the flag-gated helpers safe_flag_wait() at once, but blackout.gsc flag_init()s its flags only after
 	// _load (and our postinit) returned, so they are started once the flags exist
 	level thread blackout_scenes();
 }
@@ -137,7 +137,7 @@ blackout_latch_proc( flagName )
 		level waittill( "coop_latch_" + flagName );
 	for ( ;; )
 	{
-		if ( !flag( flagName ) )
+		if ( !safe_flag( flagName ) )
 			flag_set( flagName );
 		flag_waitopen( flagName );
 	}
@@ -145,7 +145,7 @@ blackout_latch_proc( flagName )
 
 blackout_latch_local( flagName )
 {
-	flag_wait( flagName );
+	safe_flag_wait( flagName );
 	if ( isdefined( level.coop_latched[ flagName ] ) )
 		return;
 	level.coop_latched[ flagName ] = true;

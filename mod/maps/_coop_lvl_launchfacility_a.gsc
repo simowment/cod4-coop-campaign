@@ -77,10 +77,10 @@ rappel_sync()
 	trig = getent( "trig_rappel", "targetname" );
 	if ( !isdefined( trig ) )
 		return;
-	flag_wait( "obj_rappel_complete" );
+	safe_flag_wait( "obj_rappel_complete" );
 	if ( !maps\_coop::in_coop() )
 		return;
-	flag_wait( "obj_rappel_given" );
+	safe_flag_wait( "obj_rappel_given" );
 	wait 0.25;
 	// player_rappel trigger_off()'s the trigger right after consuming it (realOrigin is recorded,
 	// common_scripts/utility.gsc:673-676)
@@ -108,7 +108,7 @@ wall_c4_sync()
 	for ( i = 0; i < ents.size; i++ )
 		ents[ i ] thread mark_detonated();
 
-	flag_wait( "flanking_wall_breached" );
+	safe_flag_wait( "flanking_wall_breached" );
 	waittillframeend;
 	if ( !maps\_coop::in_coop() )
 		return;
@@ -153,7 +153,7 @@ bmp_sync( name )
 	if ( !isdefined( bmp ) )
 		return;
 	bmp thread mark_dead();
-	flag_wait( name + "_destroyed" );
+	safe_flag_wait( name + "_destroyed" );
 	waittillframeend;
 	if ( !maps\_coop::in_coop() )
 		return;
@@ -182,7 +182,7 @@ mark_dead()
 
 gate_ent_seed()
 {
-	flag_wait( "bmp_02_destroyed" );
+	safe_flag_wait( "bmp_02_destroyed" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	if ( isdefined( level.ent ) )

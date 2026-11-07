@@ -91,10 +91,10 @@ delayed_setup()
 // field_endmission (scoutsniper.gsc:1979-1981): spotted && distance( player, price ) > 3500 -> fail
 field_pull()
 {
-	flag_wait( "field_spawn" );
+	safe_flag_wait( "field_spawn" );
 	if ( !maps\_coop::in_coop() )
 		return;
-	if ( !flag( "_stealth_spotted" ) )
+	if ( !safe_flag( "_stealth_spotted" ) )
 		return;
 	if ( !isdefined( level.price ) || !isalive( level.price ) || !isalive( level.player ) )
 		return;

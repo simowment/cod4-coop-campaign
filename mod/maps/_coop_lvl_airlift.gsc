@@ -130,7 +130,7 @@ mark19_puppet_hide()
 lz_mount_fallback()
 {
 	wait_flag_init( "obj_get_on_mark_19_complete" );
-	flag_wait( "obj_get_on_mark_19_complete" );
+	safe_flag_wait( "obj_get_on_mark_19_complete" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	wait 2;
@@ -158,7 +158,7 @@ lz_mount_fallback()
 pilot_pickup_pull()
 {
 	wait_flag_init( "pilot_taken_from_cockpit" );
-	flag_wait( "pilot_taken_from_cockpit" );
+	safe_flag_wait( "pilot_taken_from_cockpit" );
 
 	// the pilot is spawned per copy at the crash (cobrapilot_spawn :2523-2531); a lagging copy may not
 	// have her yet. The nuke start point sets the flag without ever spawning one (airlift.gsc:352).
@@ -182,11 +182,11 @@ pilot_pickup_pull()
 			return;
 		if ( !is_down() )
 		{
-			// cobrapilot_think only listens for the use after flag_wait( "player_near_crash_site" )
+			// cobrapilot_think only listens for the use after safe_flag_wait( "player_near_crash_site" )
 			// (:2794); that flag is player-local and normally arrives through the replicated
 			// flag_set trigger hit - set it on this copy if that hit was missed (only dialogue and
 			// the pilot's wave also wait on it, :2496)
-			if ( !flag( "player_near_crash_site" ) )
+			if ( !safe_flag( "player_near_crash_site" ) )
 			{
 				flag_set( "player_near_crash_site" );
 				wait 0.1;
@@ -220,13 +220,13 @@ putdown_fallback()
 {
 	wait_flag_init( "nuke_section_start" );
 	wait_flag_init( "player_putting_down_pilot" );
-	flag_wait( "nuke_section_start" );
+	safe_flag_wait( "nuke_section_start" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	wait 1.5;
 	// 90 s: covers a copy whose own pull-out only starts late (pilot_pickup_pull) plus the ~9 s rig
 	end = gettime() + 90000;
-	while ( !flag( "player_putting_down_pilot" ) && gettime() < end )
+	while ( !safe_flag( "player_putting_down_pilot" ) && gettime() < end )
 	{
 		if ( !is_down() )
 			local_notify_trigger( getent( "trig_pilot_putdown", "targetname" ) );

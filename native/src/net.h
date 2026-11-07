@@ -32,6 +32,6 @@ int net_get_pose(int slot, Pose *out); /* interpolated; returns 0 if no data */
 int net_send_event(const char *txt);   /* reliable, ordered, broadcast to all other players */
 int net_pop_event(char *out, int cap); /* "<origin>|<payload>"; system events use origin "s" */
 
-void net_set_map(const char *map, const char *start);     /* the local level that just loaded */
+void net_set_map(const char *map, const char *start, int skill);     /* the local level that just loaded */
 const char *net_host_map(void);
 int net_barrier(void);             /* 1 while waiting for everyone to load the level */

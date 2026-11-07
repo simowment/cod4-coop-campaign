@@ -107,11 +107,11 @@ client_follow_location()
 {
 	for ( ;; )
 	{
-		if ( flag( "coop_alasad_barn" ) || flag( "coop_alasad_house" ) )
+		if ( safe_flag( "coop_alasad_barn" ) || safe_flag( "coop_alasad_house" ) )
 		{
 			if ( isdefined( level.alasad_objective_location ) )
 				return; // already set up (start point)
-			if ( flag( "coop_alasad_barn" ) )
+			if ( safe_flag( "coop_alasad_barn" ) )
 				level thread do_alasad_exported( "barn" );
 			else
 				level thread do_alasad_exported( "house" );
@@ -153,7 +153,7 @@ announce_scene_start()
 
 pull_into_scene()
 {
-	flag_wait( "coop_alasad_go" );
+	safe_flag_wait( "coop_alasad_go" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	wait 1.5;

@@ -188,7 +188,7 @@ bog_a_zpu_sync()
 		return;
 	zpu endon( "c4_detonation" ); // we blew it ourselves: stock zpu_c4 handles everything
 	bog_a_wait_flag_init( "zpus_destroyed" );
-	flag_wait( "zpus_destroyed" );
+	safe_flag_wait( "zpus_destroyed" );
 	if ( !isdefined( zpu ) )
 		return;
 	if ( isdefined( level.start_point ) && ( level.start_point == "cobras" || level.start_point == "end" ) )
@@ -214,7 +214,7 @@ bog_a_beacon_sync()
 	if ( !isdefined( trig ) )
 		return;
 	bog_a_wait_flag_init( "beacon_planted" );
-	flag_wait( "beacon_planted" );
+	safe_flag_wait( "beacon_planted" );
 	// our own cobra_sequence deletes the trigger as soon as it has taken the use
 	while ( isdefined( trig ) )
 	{
@@ -231,7 +231,7 @@ bog_a_beacon_sync()
 bog_a_ending_pull()
 {
 	bog_a_wait_flag_init( "reached_ending_area" );
-	flag_wait( "reached_ending_area" );
+	safe_flag_wait( "reached_ending_area" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	if ( !isdefined( level.abrams ) )

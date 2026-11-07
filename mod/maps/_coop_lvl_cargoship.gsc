@@ -104,13 +104,13 @@ main()
 	local_waterleak_triggers();
 }
 
-// end_main only reaches flag_wait( "end_start_player_anim" ) once distance( level.player, price ) <= 490
+// end_main only reaches safe_flag_wait( "end_start_player_anim" ) once distance( level.player, price ) <= 490
 // (cargoship.gsc:3592). A player who is already inside that range is rigged by end_main in the same
 // frame the flag arrives, so they must NOT be moved (setorigin racing the PlayerLinkToAbsolute).
 // Only a player still stuck in that distance loop is moved to the jump spot.
 end_straggler()
 {
-	flag_wait( "end_start_player_anim" );
+	safe_flag_wait( "end_start_player_anim" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	if ( !isdefined( level.heroes3 ) || !isdefined( level.heroes3[ "price" ] ) )
@@ -127,7 +127,7 @@ end_straggler()
 	// (escape_heroes_holdtheline) and only run to the rescue node after this very gate
 	// (cargoship.gsc:3595-3597). If the jump spot is still > 490 from our Price, move next to him.
 	wait 0.5;
-	if ( flag( "end_linked_player_to_rig" ) || !isdefined( price ) )
+	if ( safe_flag( "end_linked_player_to_rig" ) || !isdefined( price ) )
 		return;
 	if ( distance( level.player.origin, price.origin ) <= 490 )
 		return;
@@ -174,10 +174,10 @@ catwalk_straggler()
 		return;
 	// escape_catwalk_madeit is only flag_init'ed by _load's flag_set trigger; escape_get_to_catwalks is
 	// flag_init'ed in cargoship::main and always comes first (cargoship.gsc:89, 3932)
-	flag_wait( "escape_get_to_catwalks" );
+	safe_flag_wait( "escape_get_to_catwalks" );
 	if ( !isdefined( level.flag[ "escape_catwalk_madeit" ] ) )
 		return;
-	flag_wait( "escape_catwalk_madeit" );
+	safe_flag_wait( "escape_catwalk_madeit" );
 	if ( !maps\_coop::in_coop() )
 		return;
 	wait 0.05;

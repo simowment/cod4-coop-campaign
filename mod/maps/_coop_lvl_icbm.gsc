@@ -70,11 +70,11 @@ griggs_sync()
 	usetrig = getent( "grigs_use_trigger", "targetname" );
 	if ( !isdefined( behind ) || !isdefined( usetrig ) )
 		return;
-	flag_wait( "griggs_loose" );
+	safe_flag_wait( "griggs_loose" );
 	if ( !maps\_coop::in_coop() )
 		return;
-	flag_wait( "breach_started" );
-	flag_wait( "interogators_dead" );
+	safe_flag_wait( "breach_started" );
+	safe_flag_wait( "interogators_dead" );
 	wait 0.25;
 	// player_cut_grigs_loose (747-753) trigger_off()'s the use trigger once it consumed a hit,
 	// which records realOrigin (common_scripts/utility.gsc:673-676)
@@ -108,7 +108,7 @@ tower_c4_sync()
 	level.coop_icbm_plants = 0;
 	level thread count_plants();
 
-	flag_wait( "tower_destroyed" );
+	safe_flag_wait( "tower_destroyed" );
 	waittillframeend;
 	if ( !maps\_coop::in_coop() )
 		return;

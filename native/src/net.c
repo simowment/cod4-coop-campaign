@@ -21,7 +21,7 @@ static u16 bswap16(u16 v) { return (u16)((v >> 8) | (v << 8)); }
 /* ---- protocol ---- */
 #define MAGIC 0x3443
 #define PROTO 1
-enum { PT_HELLO = 1, PT_WELCOME = 2, PT_REJECT = 3, PT_DATA = 4, PT_BYE = 5 };
+enum { PT_HELLO = 1, PT_WELCOME = 2, PT_REJECT = 3, PT_DATA = 4, PT_BYE = 5, PT_DISCOVER = 6, PT_INFO = 7 };
 #define SEND_INTERVAL 50.0
 #define HELLO_INTERVAL 500.0
 #define TIMEOUT_MS 30000.0
@@ -79,6 +79,7 @@ static struct {
 	char localMap[64], hostMap[64];
 	char pendingMap[64]; double lastMapCmd; char lastMapCmdName[64];
 	char localStart[64], hostStart[64];
+	int localSkill, hostSkill;
 	/* inbound queue to GSC */
 	char inq[256][NET_EVT_MAX + 8]; int inHead, inCount;
 	double hostOffset; int haveHostOffset;
@@ -242,7 +243,13 @@ static void handle_control(int origin, const char *txt)
 		if (!valid_mapname(b)) { logf("net: ignoring bad map name from host"); return; }
 		/* optional start point: ~MAP|map|start */
 		N.hostStart[0] = 0;
-		if (c && valid_mapname(c)) strlcpy_(N.hostStart, c, sizeof N.hostStart);
+		N.hostSkill = -1;
+		if (c) {
+			/* c = "start|skill" */
+			char *bar = c; while (*bar && *bar != '|') bar++;
+			if (*bar == '|') { *bar = 0; N.hostSkill = atoi_(bar + 1); if (N.hostSkill < 0 || N.hostSkill > 3) N.hostSkill = -1; }
+			if (valid_mapname(c) && strcmp(c, "-") != 0) strlcpy_(N.hostStart, c, sizeof N.hostStart);
+		}
 		strlcpy_(N.hostMap, b, sizeof N.hostMap);
 		logf("net: host map is '%s'", N.hostMap);
 		if (!N.host && stricmp_(N.hostMap, N.localMap) != 0) { strlcpy_(N.pendingMap, N.hostMap, sizeof N.pendingMap); N.pendingSince = now_ms(); }
@@ -332,6 +339,16 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 	if (h->magic != MAGIC || h->ver != PROTO) return;
 	double now = now_ms();
 
+	/* LAN discovery / launcher probe: anyone may ask a host what it is running */
+	if (N.host && h->type == PT_DISCOVER) {
+		u8 out[160]; PktHdr *o = (PktHdr *)out;
+		fill_hdr(o, PT_INFO, 0, 0);
+		int n = fmt((char *)out + sizeof(PktHdr), sizeof out - sizeof(PktHdr), "%s|%s|%d|%d",
+			N.localName, N.localMap[0] ? N.localMap : "menu", net_num_players(), N.maxPlayers);
+		sendto_addr(from, out, (int)sizeof(PktHdr) + n);
+		return;
+	}
+
 	if (N.host) {
 		if (h->type == PT_HELLO) {
 			char name[32]; int nl = len - (int)sizeof(PktHdr); if (nl > 31) nl = 31; if (nl < 0) nl = 0;
@@ -355,7 +372,7 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 				fmt(t, sizeof t, "~NAME|0|%s", N.localName); link_queue(&N.links[s], 0, t);
 				for (int i = 1; i < NET_MAX_PLAYERS; i++)
 					if (i != s && N.slots[i].connected) { fmt(t, sizeof t, "~NAME|%d|%s", i, N.slots[i].name); link_queue(&N.links[s], 0, t); }
-				if (N.localMap[0]) { if (N.localStart[0]) fmt(t, sizeof t, "~MAP|%s|%s", N.localMap, N.localStart); else fmt(t, sizeof t, "~MAP|%s", N.localMap); link_queue(&N.links[s], 0, t); }
+				if (N.localMap[0]) { fmt(t, sizeof t, "~MAP|%s|%s|%d", N.localMap, N.localStart[0] ? N.localStart : "-", N.localSkill); link_queue(&N.links[s], 0, t); }
 				fmt(t, sizeof t, "~JOIN|%d|%s", s, N.slots[s].name);
 				broadcast_from(0, t, s);
 				fmt(t, sizeof t, "J|%d|%s", s, N.slots[s].name); sys_event(t);
@@ -587,7 +604,9 @@ void net_frame_main(void)
 		if ((!N.localMap[0] || now - N.pendingSince > 8000.0) && now - N.lastMapCmd > (same ? 90000.0 : 3000.0)) {
 			char cmd[160];
 			/* follow the host's start point too (the "start" dvar is read by _load's handle_starts) */
-			fmt(cmd, sizeof cmd, "set start %s\nmap %s\n", N.hostStart, N.pendingMap);
+			/* play on the host's difficulty; level scripts read g_gameskill at load (_gameskill.gsc:46) */
+			if (N.hostSkill >= 0) fmt(cmd, sizeof cmd, "set g_gameskill %d\nset start %s\nmap %s\n", N.hostSkill, N.hostStart, N.pendingMap);
+			else fmt(cmd, sizeof cmd, "set start %s\nmap %s\n", N.hostStart, N.pendingMap);
 			logf("net: following host -> %s", cmd);
 			cbuf_add_text(cmd);
 			N.lastMapCmd = now;
@@ -679,8 +698,9 @@ int net_pop_event(char *out, int cap)
 	return 1;
 }
 
-void net_set_map(const char *map, const char *start)
+void net_set_map(const char *map, const char *start, int skill)
 {
+	N.localSkill = skill;
 	strlcpy_(N.localMap, map, sizeof N.localMap);
 	strlcpy_(N.localStart, (start && valid_mapname(start)) ? start : "", sizeof N.localStart);
 	if (N.pendingMap[0] && !stricmp_(N.pendingMap, map)) N.pendingMap[0] = 0;
@@ -689,7 +709,7 @@ void net_set_map(const char *map, const char *start)
 	N.levelsLoaded++;
 	if (net_num_players() > 1 || (N.host && N.levelsLoaded == 1 && N.minPlayers > 1)) { N.barrier = 1; N.barrierStart = now_ms(); }
 	if (N.host) {
-		char t[96]; if (N.localStart[0]) fmt(t, sizeof t, "~MAP|%s|%s", map, N.localStart); else fmt(t, sizeof t, "~MAP|%s", map);
+		char t[96]; fmt(t, sizeof t, "~MAP|%s|%s|%d", map, N.localStart[0] ? N.localStart : "-", N.localSkill);
 		broadcast_from(0, t, -1);
 		strlcpy_(N.hostMap, map, sizeof N.hostMap);
 		host_check_barrier();

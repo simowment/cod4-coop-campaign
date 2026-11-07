@@ -38,7 +38,7 @@
 //  * Cargoship mock-up CQB course (cargoship_training, killhouse.gsc:2142-2374; killhouse_code.gsc
 //    624-1030): a solo timed run. Course state lives in flags that stock clears locally
 //    (killhouse.gsc:2337-2341) - with union replication a squadmate's run would complete/skip ours
-//    (e.g. at_finish set by them -> our flag_wait("at_finish") passes, killhouse.gsc:2334). Decision:
+//    (e.g. at_finish set by them -> our safe_flag_wait("at_finish") passes, killhouse.gsc:2334). Decision:
 //    every course flag (at_top_of_ladder, activate_rope, got_flashes, sprint, sprinted, ready_to_finish,
 //    at_finish) and every course trigger (top_of_ladder_trigger, top_of_rope_trigger, near_rope,
 //    jump_off_trigger, position_one..six) is local, so both players run their own course and get their
