@@ -20,26 +20,26 @@ puppet_precache()
 init()
 {
 	a = [];
-	a[ "stand_idle" ] = %exposed_idle_alert_v1;
-	a[ "stand_aim" ] = %exposed_aim_5;
-	a[ "crouch_idle" ] = %exposed_crouch_idle_alert_v1;
-	a[ "crouch_aim" ] = %exposed_crouch_aim_5;
-	a[ "prone" ] = %prone_aim_5;
+	a[ "stand_idle" ] = %drone_stand_idle;
+	a[ "stand_aim" ] = %drone_stand_idle;
+	a[ "crouch_idle" ] = %casual_crouch_idle;
+	a[ "crouch_aim" ] = %casual_crouch_idle;
+	a[ "prone" ] = %prone_crawl;
 	a[ "crawl" ] = %prone_crawl;
-	a[ "walk_f" ] = %walk_lowready_f;
-	a[ "walk_b" ] = %walk_lowready_b;
-	a[ "walk_l" ] = %walk_lowready_l;
-	a[ "walk_r" ] = %walk_lowready_r;
-	a[ "run_f" ] = %run_lowready_f;
-	a[ "run_b" ] = %run_lowready_b;
-	a[ "run_l" ] = %run_lowready_l;
-	a[ "run_r" ] = %run_lowready_r;
+	a[ "walk_f" ] = %drone_stand_run;
+	a[ "walk_b" ] = %drone_stand_run;
+	a[ "walk_l" ] = %drone_stand_run;
+	a[ "walk_r" ] = %drone_stand_run;
+	a[ "run_f" ] = %drone_stand_run;
+	a[ "run_b" ] = %drone_stand_run;
+	a[ "run_l" ] = %drone_stand_run;
+	a[ "run_r" ] = %drone_stand_run;
 	a[ "crouch_f" ] = %crouch_fastwalk_f;
 	a[ "crouch_b" ] = %crouch_fastwalk_b;
 	a[ "crouch_l" ] = %crouch_fastwalk_l;
 	a[ "crouch_r" ] = %crouch_fastwalk_r;
-	a[ "sprint" ] = %sprint1_loop;
-	a[ "downed" ] = %prone_aim_5;
+	a[ "sprint" ] = %drone_stand_run;
+	a[ "downed" ] = %prone_crawl;
 	level.coop.puppet_anims = a;
 	thread find_character();
 	// levels whose scripts drive AI with setentitytarget themselves: leave their targeting alone
@@ -198,8 +198,8 @@ update_puppet( slot )
 	speed = dist / 0.05;
 	self.coop_speed = self.coop_speed * 0.6 + speed * 0.4;
 	self.coop_lastpos = pos;
-	self.origin = pos;
-	self.angles = ( 0, yaw, 0 );
+	self.coop_pos = pos;
+	self.coop_yaw = yaw;
 
 	self set_puppet_anim( choose_anim( flags, delta, yaw ) );
 	self replay_shots( slot, flags, pos, pitch, yaw );
@@ -250,17 +250,47 @@ choose_anim( flags, delta, yaw )
 	return "stand_idle";
 }
 
+// Fake-AI script models only animate through animscripted (the drone technique), and a scripted anim is
+// drawn at its anchor, not at the entity origin. So the anim is re-anchored on the network pose whenever
+// that moves or turns, continuing from the same point in the cycle (getanimtime/setanimtime).
+// A small loop restarts it when a non-looping anim reaches its end.
 set_puppet_anim( name )
 {
-	if ( self.coop_anim == name )
-		return;
+	changed = self.coop_anim != name;
 	self.coop_anim = name;
-	rate = 1;
-	if ( name == "walk_f" || name == "walk_b" || name == "walk_l" || name == "walk_r" )
-		rate = clamp_f( self.coop_speed / 90, 0.6, 1.4 );
-	else if ( issubstr( name, "run_" ) )
-		rate = clamp_f( self.coop_speed / 190, 0.7, 1.3 );
-	self setflaggedanimknoball( "coop_anim", level.coop.puppet_anims[ name ], %body, 1, 0.2, rate );
+	pa = level.coop.puppet_anims[ name ];
+	if ( !isdefined( self.coop_pos ) )
+		return;
+	moved = !isdefined( self.coop_anchor ) || distance( self.coop_anchor, self.coop_pos ) > 1
+		|| abs( angle180( self.coop_anchor_yaw - self.coop_yaw ) ) > 2;
+	if ( !changed && !moved )
+		return;
+	if ( isdefined( self.coop_anim_frame ) && self.coop_anim_frame == gettime() )
+		return; // animscripted may only be issued once per entity per frame
+	t = 0;
+	if ( !changed && isdefined( self.coop_anchor ) )
+		t = self getanimtime( pa );
+	self.coop_anchor = self.coop_pos;
+	self.coop_anchor_yaw = self.coop_yaw;
+	self.coop_anim_frame = gettime();
+	self animscripted( "coop_anim", self.coop_pos, ( 0, self.coop_yaw, 0 ), pa );
+	if ( t > 0 && t < 1 )
+		self setanimtime( pa, t );
+	if ( !isdefined( self.coop_anim_loop ) )
+	{
+		self.coop_anim_loop = true;
+		self thread puppet_anim_restart();
+	}
+}
+
+puppet_anim_restart()
+{
+	self endon( "death" );
+	for ( ;; )
+	{
+		self waittillmatch( "coop_anim", "end" );
+		self.coop_anchor = undefined; // forces a fresh start on the next update
+	}
 }
 
 angle180( a )

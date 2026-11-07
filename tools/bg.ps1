@@ -7,7 +7,7 @@ param([string]$Op, [string]$Tag = "0", [string]$Arg = "", [double]$Scale = 0.6)
 $game = "C:\Users\got\Downloads\Call.of.Duty.4.Modern.Warfare\Call of Duty 4-Modern Warfare"
 switch ($Op) {
   "launch" {
-    $a = "+set coop_background 1 +set in_mouse 0 +set coop_tag $Tag +set r_fullscreen 0 +set r_mode 800x600 +set com_maxfps 60 +set vid_xpos 1920 +set vid_ypos 0 +set logfile 2 $Arg"
+    $a = "allowdupe +set coop_background 1 +set in_mouse 0 +set loc_warnings 0 +set coop_tag $Tag +set r_fullscreen 0 +set r_mode 800x600 +set com_maxfps 60 +set vid_xpos 1920 +set vid_ypos 0 +set logfile 2 $Arg"
     $p = Start-Process -FilePath "$game\iw3sp.exe" -WorkingDirectory $game -ArgumentList $a -PassThru
     "pid=$($p.Id)"
   }

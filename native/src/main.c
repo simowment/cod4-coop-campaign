@@ -35,6 +35,23 @@ static int patch_vtable(void **vt, int idx, void *fn, void **orig)
 static void main_tick(void)
 {
 	if (!g_enabled) return;
+	static int once;
+	if (!once) { once = 1; cbuf_add_text("set loc_warnings 0\n"); } /* else plain-text HUD names show "UNLOCALIZED:" (script may not set it) */
+	/* +set coop_startmap X: start at the menu and load X from there. Loading a map straight from the
+	   command line can stall before the first server frame when the window is not focused. */
+	static int startDone; static double t0;
+	if (!startDone) {
+		if (t0 == 0.0) t0 = now_ms();
+		if (now_ms() - t0 > 4000.0) {
+			char m[64], cmd[96];
+			startDone = 1;
+			if (cmdline_get("coop_startmap", m, sizeof m) && m[0]) {
+				int ok = 1;
+				for (char *q = m; *q; q++) if (!((*q >= 'a' && *q <= 'z') || (*q >= '0' && *q <= '9') || *q == '_')) ok = 0;
+				if (ok) { fmt(cmd, sizeof cmd, "map %s\n", m); logf("proxy: start map %s", m); cbuf_add_text(cmd); }
+			}
+		}
+	}
 	net_frame_main();
 	devmode_main();
 	if (net_barrier()) dvar_set_int("cl_paused", 1);
@@ -109,6 +126,7 @@ static void start_once(void)
 	if (!bridge_install()) { logf("proxy: bridge install failed, coop disabled"); return; }
 	logf("proxy: GSC bridge installed");
 	if (!install_mainloop_hook()) { logf("proxy: main loop hook failed, coop disabled"); return; }
+	devmode_patch_pause();
 	logf("proxy: main loop hooked");
 	net_init();
 	g_enabled = 1;
@@ -133,9 +151,36 @@ __attribute__((dllexport)) void *WINAPI Direct3DCreate9(u32 sdk)
 	return d3d;
 }
 
+/* test mode: log the game-code return addresses on the exit path (why did the process quit?) */
+static void log_exit_stack(void)
+{
+	u32 *sp; __asm__ volatile("movl %%esp, %0" : "=r"(sp));
+	char buf[600]; int n = 0;
+	for (int i = 0; i < 3000 && n < 560; i++) {
+		u32 v = sp[i];
+		if (v >= 0x401000 && v < 0x65d000) n += fmt(buf + n, 600 - n, "%x ", v);
+	}
+	buf[n] = 0;
+	logf("exit path (iw3sp return addresses): %s", buf);
+}
+
 BOOL WINAPI DllMain(HMODULE h, u32 reason, void *res)
 {
-	(void)h; (void)res;
-	if (reason == 0 /* DLL_PROCESS_DETACH */ && g_enabled && res == NULL) net_leave();
+	(void)h;
+	if (reason == 1 /* DLL_PROCESS_ATTACH */) {
+		char v[64];
+		if (cmdline_get("coop_background", v, sizeof v) && v[0] == '1') {
+			char path[300], tag[32];
+			u32 n = GetModuleFileNameA(NULL, path, sizeof path - 40);
+			while (n && path[n - 1] != 92 /* backslash */) n--;
+			fmt(path + n, (int)(sizeof path - n), "coop_early_%s.log", cmdline_get("coop_tag", tag, sizeof tag) ? tag : "0");
+			log_open(path);
+			logf("process attach");
+		}
+	}
+	if (reason == 0 /* DLL_PROCESS_DETACH */) {
+		log_exit_stack();
+		if (g_enabled && res == NULL) net_leave();
+	}
 	return 1;
 }

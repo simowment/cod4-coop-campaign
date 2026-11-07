@@ -17,4 +17,4 @@ set /p SQUAD="Squad size to wait for before the mission starts (1-4) [2]: "
 if "%SQUAD%"=="" set SQUAD=2
 echo.
 echo Hosting "%MAP%" as %NAME%. The mission will hold on "Waiting for your squad" until %SQUAD% players are in.
-start "" iw3sp.exe +set fs_game mods/coop +set coop_host 1 +set coop_wait %SQUAD% +set coop_name "%NAME%" +map %MAP%
+start "" iw3sp.exe +set fs_game mods/coop +set loc_warnings 0 +set coop_host 1 +set coop_wait %SQUAD% +set coop_name "%NAME%" +set coop_startmap %MAP%

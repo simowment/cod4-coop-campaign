@@ -113,6 +113,11 @@ def lint(path, res, builtins):
         if re.search(r'\bthread\s*$', st) or re.search(r'\bthread\s*;', st):
             errs.append('%s:%d: dangling thread keyword' % (path, ln))
         depth += line.count('{') - line.count('}')
+    # reserved globals cannot be assigned as locals ("bad syntax" at compile)
+    for ln, line in enumerate(lines, 1):
+        m = re.match(r'^\s*(anim|level|game|self)\s*=[^=]', line)
+        if m:
+            errs.append('%s:%d: "%s" is a reserved global; cannot be a local variable' % (path, ln, m.group(1)))
     # calls
     for ln, line in enumerate(lines, 1):
         if line.strip().startswith('#'):

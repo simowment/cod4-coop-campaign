@@ -12,4 +12,4 @@ if "%HOST%"=="" (
   exit /b 1
 )
 echo Joining %HOST% as %NAME%...
-start "" iw3sp.exe +set fs_game mods/coop +set coop_connect %HOST% +set coop_name "%NAME%"
+start "" iw3sp.exe +set fs_game mods/coop +set loc_warnings 0 +set coop_connect %HOST% +set coop_name "%NAME%"

@@ -88,6 +88,26 @@ void devmode_init(void)
 
 const char *devmode_tag(void) { return g_tag; }
 
+/* Background test instances must never pause: the game pauses itself every frame when its window does not
+   have focus, and whichever instance pauses inside its own frame order freezes. Turn every
+   `push "cl_paused"; mov eax, 1; call Dvar_SetIntByName` into `mov eax, 0`. Test mode only. */
+void devmode_patch_pause(void)
+{
+	static const u32 sites[] = { 0x445e2c, 0x566f25, 0x567b61, 0x567bc5, 0x5c6fe0 };
+	int n = 0;
+	if (!g_devmode) return;
+	for (u32 i = 0; i < sizeof sites / sizeof sites[0]; i++) {
+		u8 *p = (u8 *)sites[i];
+		if (p[-5] != 0x68 || *(u32 *)(p - 4) != 0x689e40 || p[0] != 0xb8 || *(u32 *)(p + 1) != 1) continue;
+		u32 old;
+		if (!VirtualProtect(p + 1, 4, 0x40, &old)) continue;
+		*(u32 *)(p + 1) = 0;
+		VirtualProtect(p + 1, 4, old, &old);
+		n++;
+	}
+	logf("devmode: %d pause sites disabled", n);
+}
+
 static void park_window(void)
 {
 	if (!g_gameWnd || !IsWindow(g_gameWnd)) return;

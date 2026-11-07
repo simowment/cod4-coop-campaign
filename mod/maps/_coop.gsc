@@ -35,6 +35,7 @@ preinit()
 	c.cleared_at = [];
 	c.handlers = [];
 	c.shots = 0;
+	c.hb = 0;
 	c.down = false;
 
 	if ( !c.active )
@@ -157,8 +158,32 @@ net_loop()
 		}
 		apply_pending_flags();
 		maps\_coop_puppet::update_all();
+		test_teleport();
+		c.hb = c.hb + 1;
+		if ( c.hb % 100 == 0 && getdvar( "coop_heartbeat" ) == "1" )
+			log( "hb t=" + gettime() + " pos=" + level.player.origin + " players=" + players() + " puppets=" + c.puppets.size );
+		if ( c.hb % 100 == 0 && getdvar( "coop_heartbeat" ) == "1" )
+			for ( ps = 0; ps < c.max; ps++ )
+				if ( isdefined( c.puppets[ ps ] ) )
+					log( "  puppet " + ps + " at " + c.puppets[ ps ].origin + " net " + ( fgetarg( ps, 0 ), fgetarg( ps, 1 ), fgetarg( ps, 2 ) ) + " hidden " + c.puppets[ ps ].coop_hidden + " anim " + c.puppets[ ps ].coop_anim + " flags " + fgetarg( ps, 5 ) );
 		wait 0.05;
 	}
+}
+
+// test hook: "set coop_test_tp x y z yaw" teleports the local player (automated tests, no cheats needed)
+test_teleport()
+{
+	v = getdvar( "coop_test_tp" );
+	if ( v == "" )
+		return;
+	setdvar( "coop_test_tp", "" );
+	t = strtok( v, " " );
+	if ( t.size < 3 )
+		return;
+	level.player setorigin( ( int( t[ 0 ] ), int( t[ 1 ] ), int( t[ 2 ] ) ) );
+	if ( t.size >= 4 )
+		level.player setplayerangles( ( 0, int( t[ 3 ] ), 0 ) );
+	log( "test teleport " + v );
 }
 
 drain_stale_events()

@@ -44,6 +44,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--game', default=DEFAULT_GAME)
     ap.add_argument('--mod', default='coop')
+    ap.add_argument('--also', default='', help='comma list of extra mod folder names to mirror into (tests)')
     a = ap.parse_args()
     exe = os.path.join(a.game, 'iw3sp.exe')
     if not os.path.isfile(exe):
@@ -72,6 +73,10 @@ def main():
             shutil.copyfile(s, d)
             c += 1
     print('copied mod files:', c)
+    for extra in [x for x in a.also.split(',') if x]:
+        dst = os.path.join(a.game, 'Mods', extra)
+        shutil.copytree(out, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns('console.log'))
+        print('mirrored to Mods/' + extra)
 
     dll = os.path.join(ROOT, 'native', 'build', 'd3d9.dll')
     if os.path.isfile(dll):
