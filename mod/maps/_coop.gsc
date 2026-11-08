@@ -216,6 +216,8 @@ test_command()
 		else
 			log( "test kill: no axis with an id (" + ai.size + " axis alive)" );
 	}
+	else if ( v == "botdemo" )
+		level.coop.bot_demo = true;
 	else if ( v == "nearaxis" )
 	{
 		// move next to the nearest living enemy (bot combat tests)

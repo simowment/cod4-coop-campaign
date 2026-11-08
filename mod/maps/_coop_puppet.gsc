@@ -20,26 +20,28 @@ puppet_precache()
 init()
 {
 	a = [];
-	a[ "stand_idle" ] = %drone_stand_idle;
-	a[ "stand_aim" ] = %drone_stand_idle;
+	// real generic_human anims from common.ff (the drone_stand_* anims are not in the game: they fell back
+	// to a junk pose). All are full-body loops, which is what animscripted needs on a fake-AI model.
+	a[ "stand_idle" ] = %casual_stand_idle;
+	a[ "stand_aim" ] = %exposed_aim_5;
 	a[ "crouch_idle" ] = %casual_crouch_idle;
-	a[ "crouch_aim" ] = %casual_crouch_idle;
-	a[ "prone" ] = %prone_crawl;
+	a[ "crouch_aim" ] = %exposed_crouch_aim_5;
+	a[ "prone" ] = %prone_aim_5;
 	a[ "crawl" ] = %prone_crawl;
-	a[ "walk_f" ] = %drone_stand_run;
-	a[ "walk_b" ] = %drone_stand_run;
-	a[ "walk_l" ] = %drone_stand_run;
-	a[ "walk_r" ] = %drone_stand_run;
-	a[ "run_f" ] = %drone_stand_run;
-	a[ "run_b" ] = %drone_stand_run;
-	a[ "run_l" ] = %drone_stand_run;
-	a[ "run_r" ] = %drone_stand_run;
-	a[ "crouch_f" ] = %crouch_fastwalk_f;
-	a[ "crouch_b" ] = %crouch_fastwalk_b;
-	a[ "crouch_l" ] = %crouch_fastwalk_l;
-	a[ "crouch_r" ] = %crouch_fastwalk_r;
-	a[ "sprint" ] = %drone_stand_run;
-	a[ "downed" ] = %prone_crawl;
+	a[ "walk_f" ] = %walk_lowready_F;
+	a[ "walk_b" ] = %walk_lowready_B;
+	a[ "walk_l" ] = %walk_lowready_L;
+	a[ "walk_r" ] = %walk_lowready_R;
+	a[ "run_f" ] = %run_lowready_F;
+	a[ "run_b" ] = %run_lowready_B;
+	a[ "run_l" ] = %run_lowready_L;
+	a[ "run_r" ] = %run_lowready_R;
+	a[ "crouch_f" ] = %crouch_fastwalk_F;
+	a[ "crouch_b" ] = %crouch_fastwalk_B;
+	a[ "crouch_l" ] = %crouch_fastwalk_L;
+	a[ "crouch_r" ] = %crouch_fastwalk_R;
+	a[ "sprint" ] = %sprint1_loop;
+	a[ "downed" ] = %prone_aim_5;
 	level.coop.puppet_anims = a;
 	thread find_character();
 	// levels whose scripts drive AI with setentitytarget themselves: leave their targeting alone
@@ -278,7 +280,17 @@ set_puppet_anim( name )
 	self.coop_anchor = self.coop_pos;
 	self.coop_anchor_yaw = self.coop_yaw;
 	self.coop_anim_frame = gettime();
-	self animscripted( "coop_anim", self.coop_pos, ( 0, self.coop_yaw, 0 ), pa );
+	// locomotion anims carry root motion: resuming at time t would draw the body t's worth of travel ahead
+	// of the real position (surge, then snap back = sliding). Pull the anchor back by exactly that travel.
+	anchor = self.coop_pos;
+	if ( t > 0 && t < 1 )
+	{
+		md = getmovedelta( pa, 0, t );
+		cy = cos( self.coop_yaw );
+		sy = sin( self.coop_yaw );
+		anchor = anchor - ( md[ 0 ] * cy - md[ 1 ] * sy, md[ 0 ] * sy + md[ 1 ] * cy, 0 );
+	}
+	self animscripted( "coop_anim", anchor, ( 0, self.coop_yaw, 0 ), pa );
 	if ( t > 0 && t < 1 )
 		self setanimtime( pa, t );
 	if ( !isdefined( self.coop_anim_loop ) )

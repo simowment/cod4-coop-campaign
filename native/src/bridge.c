@@ -12,6 +12,7 @@
 #include "bridge.h"
 #include "game.h"
 #include "net.h"
+#include "devmode.h"
 
 int g_forceUnpause = 1;
 static int g_as = -1; /* openfile("coop","as",slot): the next fprintln/fprintfields speaks for that bot slot */
@@ -56,6 +57,7 @@ static void bi_openfile(void)
 	if (!strcmp(cmd, "barrier")) { scr_add_int(net_barrier()); return; }
 	/* level time heartbeat; returns the previous value. A smaller value than last time means a save was loaded */
 	if (!strcmp(cmd, "tick")) { static int last; int prev = last; last = iarg; scr_add_int(prev); return; }
+	if (!strcmp(cmd, "shot")) { devmode_request_shot(arg); scr_add_int(1); return; }
 	if (!strcmp(cmd, "bots")) { scr_add_int(net_bot_mask()); return; }
 	if (!strcmp(cmd, "isbot")) { scr_add_int(net_is_bot(iarg)); return; }
 	if (!strcmp(cmd, "as")) { g_as = net_is_bot(iarg) ? iarg : -1; scr_add_int(g_as >= 0); return; }

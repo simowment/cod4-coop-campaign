@@ -50,7 +50,15 @@ bot_pose( slot, b, flags, pitch, yaw )
 
 ground_at( pos )
 {
-	tr = bullettrace( pos + ( 0, 0, 48 ), pos - ( 0, 0, 160 ), false, undefined );
+	// ignore every puppet: the trace would land on the bot's own body and float it
+	ignore = undefined;
+	for ( i = 0; i < level.coop.max; i++ )
+		if ( isdefined( level.coop.puppets[ i ] ) )
+		{
+			ignore = level.coop.puppets[ i ];
+			break;
+		}
+	tr = bullettrace( pos + ( 0, 0, 48 ), pos - ( 0, 0, 160 ), false, ignore );
 	if ( tr[ "fraction" ] < 1 )
 		return tr[ "position" ];
 	return pos;
@@ -168,6 +176,12 @@ bot_think( slot, idx )
 
 	for ( ;; )
 	{
+		if ( isdefined( c.bot_demo ) )
+		{
+			c.bot_demo = undefined;
+			bot_demo( slot, b );
+			b.trail = [];
+		}
 		tick++;
 		now = gettime();
 
@@ -407,4 +421,112 @@ turn_toward( a, b, maxStep )
 	else if ( d < 0 - maxStep )
 		d = 0 - maxStep;
 	return maps\_coop_puppet::angle180( a + d );
+}
+
+// ---------------------------------------------------------------------------------------------
+// animation check (test cmd "botdemo"): the bot performs every puppet animation state in front of the
+// host's camera, 3 s each, logging "botdemo <phase>" so screenshots can be matched to phases
+// ---------------------------------------------------------------------------------------------
+
+bot_demo( slot, b )
+{
+	p = level.player;
+	// turn the camera to the most open direction (no wall, no character within 260 units if possible)
+	eye = p geteye();
+	best = 0;
+	bestf = -1;
+	for ( y = 0; y < 360; y += 15 )
+	{
+		// the bot walks up to 70 units either side, so the whole cone must be open, not just the centre line
+		f = 1;
+		for ( dy = -30; dy <= 30; dy += 15 )
+		{
+			dir = anglestoforward( ( 0, y + dy, 0 ) );
+			tr = bullettrace( eye, eye + vectorscale( dir, 240 ), true, p );
+			low = bullettrace( p.origin + ( 0, 0, 20 ), p.origin + ( 0, 0, 20 ) + vectorscale( dir, 240 ), true, p );
+			f = min( f, min( tr[ "fraction" ], low[ "fraction" ] ) );
+		}
+		if ( f > bestf )
+		{
+			bestf = f;
+			best = y;
+		}
+	}
+	p setplayerangles( ( 10, best, 0 ) );
+	maps\_coop::log( "botdemo facing " + best + " clear " + bestf );
+	wait 0.1;
+	a = p getplayerangles();
+	fwd = anglestoforward( ( 0, a[ 1 ], 0 ) );
+	right = anglestoright( ( 0, a[ 1 ], 0 ) );
+	center = ground_at( p.origin + vectorscale( fwd, 170 ) );
+	face = a[ 1 ] + 180; // looking at the camera
+	// name, stance, flags, speed, mode (still / across = sideways facing travel / strafe = sideways facing camera / away = backing away facing camera)
+	ph = [];
+	ph[ ph.size ] = "stand_idle|0|0|0|still";
+	ph[ ph.size ] = "stand_aim|0|4|0|still";
+	ph[ ph.size ] = "stand_fire|0|12|0|still";
+	ph[ ph.size ] = "walk_f|0|0|100|across";
+	ph[ ph.size ] = "walk_strafe|0|0|100|strafe";
+	ph[ ph.size ] = "walk_b|0|0|100|away";
+	ph[ ph.size ] = "run_f|0|0|185|across";
+	ph[ ph.size ] = "run_strafe|0|0|185|strafe";
+	ph[ ph.size ] = "run_b|0|0|185|away";
+	ph[ ph.size ] = "sprint|0|0|250|across";
+	ph[ ph.size ] = "crouch_idle|1|0|0|still";
+	ph[ ph.size ] = "crouch_aim|1|4|0|still";
+	ph[ ph.size ] = "crouch_walk|1|0|90|across";
+	ph[ ph.size ] = "prone|2|0|0|still";
+	ph[ ph.size ] = "crawl|2|0|40|across";
+	ph[ ph.size ] = "downed|2|16|0|still";
+	for ( i = 0; i < ph.size; i++ )
+	{
+		t = strtok( ph[ i ], "|" );
+		stance = int( t[ 1 ] );
+		flags = int( t[ 2 ] );
+		speed = int( t[ 3 ] );
+		mode = t[ 4 ];
+		maps\_coop::log( "botdemo " + t[ 0 ] );
+		off = -70;
+		dirsign = 1;
+		if ( mode == "away" )
+			off = 0;
+		for ( k = 0; k < 60; k++ )
+		{
+			yaw = face;
+			if ( mode == "across" || mode == "strafe" )
+			{
+				off += dirsign * speed * 0.05;
+				if ( off > 70 || off < -70 )
+					dirsign = 0 - dirsign;
+				pos = center + vectorscale( right, off );
+				if ( mode == "across" )
+				{
+					ra = vectortoangles( vectorscale( right, dirsign ) );
+					yaw = ra[ 1 ];
+				}
+			}
+			else if ( mode == "away" )
+			{
+				off += speed * 0.05;
+				if ( off > 120 )
+					off = 0;
+				pos = center + vectorscale( fwd, off );
+			}
+			else
+				pos = center;
+			b.origin = ground_at( pos );
+			f = stance + flags;
+			if ( ( flags & 8 ) != 0 && k % 3 == 0 )
+				b.shots++;
+			f += ( b.shots % 256 ) * 256;
+			fire_yaw = yaw;
+			if ( ( flags & 8 ) != 0 )
+				fire_yaw = yaw + 50; // replayed shots toward the camera are suppressed; aim to the side
+			bot_pose( slot, b, f, 0, fire_yaw );
+			if ( k == 25 || k == 45 )
+				openfile( "coop", "shot", t[ 0 ] + "_" + k ); // test mode only: the proxy saves this frame
+			wait 0.05;
+		}
+	}
+	maps\_coop::log( "botdemo done" );
 }

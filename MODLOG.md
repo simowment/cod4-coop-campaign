@@ -85,3 +85,16 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
   ~100 units, bot kills (target down after 3 shots; several more K events).
 - Test-only artifact: in background mode the input-less host never lands after a teleport, so ride detection
   hides the bot. `+set coop_test_nolink 1` and test cmd `nearaxis` exist for this.
+
+## Puppet animation fix + fast visual test (2026-11-08)
+- `drone_stand_idle` / `drone_stand_run` are NOT xanims in this game ("Could not load xanim"): every standing
+  puppet pose was a junk fallback. Now: casual_stand_idle, exposed_aim_5, walk_lowready_*, run_lowready_*,
+  sprint1_loop, exposed_crouch_aim_5, prone_aim_5 (all full-body, in common.ff).
+- Locomotion anims carry root motion; re-anchoring animscripted mid-cycle drew the body ahead of the real
+  position (surge + snap = sliding, or off-screen). Anchor is now pulled back by getmovedelta(anim, 0, t).
+- Bot ground trace hit the bot's own body (floating): traces ignore the puppet.
+- Fast test loop: test mode rewrites the hard-coded "%s\main\video\%s.%s" to "%s\mods\ctv\%s.%s" with a
+  468-byte stub (credits_load.bik) -> gameplay 3 s after load instead of 35-45 s. GSC can request a named
+  screenshot at an exact moment: openfile("coop","shot",name). `bash tools/botdemo_test.sh <out> killhouse start`
+  runs the whole bot animation check (16 phases x 2 frames + contact sheet) in ~66 s, on port 28971 and
+  fs_game mods/cooptest so it never touches a running player game.

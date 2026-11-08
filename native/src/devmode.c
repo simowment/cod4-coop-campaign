@@ -106,6 +106,23 @@ void devmode_patch_pause(void)
 		n++;
 	}
 	logf("devmode: %d pause sites disabled", n);
+
+	/* Fast loads: the mission briefing video holds the level for 30-45 s and is read from a hard-coded
+	   "<base>\main\video\<name>.bik". Point that at "<base>\mods\ctv\" (same length budget), where the test
+	   driver puts a 468-byte stub for the map's _load video. Test mode only. */
+	static const char from[] = "%s\\main\\video\\%s.%s";
+	static const char to[] = "%s\\mods\\ctv\\%s.%s";
+	u8 *base = (u8 *)0x400000;
+	u32 size = *(u32 *)(base + *(u32 *)(base + 0x3c) + 0x50);
+	for (u32 o = 0x1000; o + sizeof from < size; o++) {
+		if (base[o] != '%' || memcmp(base + o, from, sizeof from) != 0) continue;
+		u32 old;
+		if (!VirtualProtect(base + o, sizeof from, 0x04, &old)) break;
+		memcpy(base + o, to, sizeof to);
+		VirtualProtect(base + o, sizeof from, old, &old);
+		logf("devmode: briefing videos redirected to mods\\ctv");
+		break;
+	}
 }
 
 static void park_window(void)
@@ -159,7 +176,7 @@ static void run_cmd_file(void)
 }
 
 /* backbuffer -> system memory -> top-down 32-bit BMP */
-static void take_shot(void *dev)
+static void take_shot(void *dev, const char *name)
 {
 	typedef s32 (WINAPI *GetBackBuffer_t)(void *, u32, u32, u32, void **);
 	typedef s32 (WINAPI *CreateOffscreen_t)(void *, u32, u32, u32, u32, void **, void *);
@@ -202,7 +219,8 @@ static void take_shot(void *dev)
 		*(u32 *)(hdr + 2) = 54 + size; *(u32 *)(hdr + 10) = 54;
 		*(u32 *)(hdr + 14) = 40; *(s32 *)(hdr + 18) = (s32)w; *(s32 *)(hdr + 22) = -(s32)h;
 		*(u16 *)(hdr + 26) = 1; *(u16 *)(hdr + 28) = 32; *(u32 *)(hdr + 34) = size;
-		path_of(path, sizeof path, "coop_shot", ".bmp");
+		if (name && name[0]) { char stem[96]; path_of(stem, sizeof stem, "coop_shot", ""); fmt(path, sizeof path, "%s_%s.bmp", stem, name); }
+		else path_of(path, sizeof path, "coop_shot", ".bmp");
 		u8 *bits = (u8 *)lr[1];
 		if (lr[0] == (s32)rowBytes) write_file(path, hdr, 54, bits, size);
 		else {
@@ -233,11 +251,24 @@ void devmode_main(void)
 	run_cmd_file();
 }
 
+/* GSC asks for a named screenshot at an exact moment (openfile("coop","shot",name)); taken on the next Present */
+static char g_shotName[64];
+static volatile int g_shotPending;
+void devmode_request_shot(const char *name)
+{
+	if (!g_devmode || g_shotPending) return;
+	int n = 0;
+	for (; name[n] && n < 63; n++) { char c = name[n]; g_shotName[n] = ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') ? c : '_'; }
+	g_shotName[n] = 0;
+	g_shotPending = 1;
+}
+
 /* render thread, inside Present: the only safe place to read the backbuffer */
 static double g_lastShotPoll;
 void devmode_render(void *dev)
 {
 	if (!g_devmode || !dev) return;
+	if (g_shotPending) { take_shot(dev, g_shotName); g_shotPending = 0; }
 	double now = now_ms();
 	if (now - g_lastShotPoll < 200.0) return;
 	g_lastShotPoll = now;
@@ -245,6 +276,6 @@ void devmode_render(void *dev)
 	path_of(req, sizeof req, "coop_shot", ".req");
 	if (GetFileAttributesA(req) != 0xffffffffu) {
 		DeleteFileA(req);
-		take_shot(dev);
+		take_shot(dev, 0);
 	}
 }
