@@ -131,7 +131,9 @@ update_all()
 	{
 		if ( slot == c.slot )
 			continue;
-		if ( !openfile( "coop", "connected", slot ) || fgetarg( slot, 10 ) > 3000 )
+		// a bot that is a real AI in this world needs no puppet here
+		real_bot = isdefined( c.bot_ai ) && isdefined( c.bot_ai[ slot ] ) && isalive( c.bot_ai[ slot ] );
+		if ( real_bot || !openfile( "coop", "connected", slot ) || fgetarg( slot, 10 ) > 3000 )
 		{
 			if ( isdefined( c.puppets[ slot ] ) )
 				c.puppets[ slot ] hide_puppet();

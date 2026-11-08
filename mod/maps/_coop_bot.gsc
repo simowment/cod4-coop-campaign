@@ -153,6 +153,20 @@ bot_think( slot, idx )
 	level endon( "coop_stop" );
 	c = level.coop;
 	p = level.player;
+	// preferred: a real campaign soldier, driven by the game's own AI (pathing, cover, anims, combat)
+	if ( !isdefined( c.bot_ai ) )
+		c.bot_ai = [];
+	for ( ;; )
+	{
+		guy = spawn_real_bot( slot, idx );
+		if ( !isdefined( guy ) )
+			break;
+		bot_ai_think( slot, idx, guy ); // returns if the level removed it: spawn a new one
+		if ( isdefined( c.bot_ai_frozen ) )
+			break; // this level's scripts hold its AI still (e.g. killhouse): use the scripted bot
+		wait 2;
+	}
+	// fallback (no friendly spawner in this level): the scripted puppet bot below
 	b = spawnstruct();
 	b.origin = spot_behind_host( idx );
 	b.trail = [];
@@ -639,6 +653,8 @@ follow_test( slot )
 	maps\_coop::log( "botfollow dir " + best + " room " + int( bestd ) );
 	p setplayerangles( look );
 	c.bot_place = ground_at( p.origin - vectorscale( dir, 110 ) );
+	if ( isdefined( c.bot_ai ) && isdefined( c.bot_ai[ slot ] ) )
+		c.bot_ai[ slot ] teleport( c.bot_place, ( 0, best, 0 ) );
 	wait 1;
 	segs = [];
 	segs[ segs.size ] = "walk|90|50";
@@ -665,6 +681,8 @@ follow_test( slot )
 			}
 			p setplayerangles( look );
 			pup = c.puppets[ slot ];
+			if ( isdefined( c.bot_ai ) && isdefined( c.bot_ai[ slot ] ) )
+				pup = c.bot_ai[ slot ];
 			if ( isdefined( pup ) )
 			{
 				if ( isdefined( last ) && k > 5 )
@@ -678,4 +696,209 @@ follow_test( slot )
 		step_stats( "follow_" + t[ 0 ], steps, c.reanchors - r0 );
 	}
 	maps\_coop::log( "botfollow done" );
+}
+
+// ---------------------------------------------------------------------------------------------
+// real-AI bot: borrow one of the level's friendly spawners the way the stock makerealai() does
+// (move it, force-spawn, put it back), then let the game's own AI follow the host
+// ---------------------------------------------------------------------------------------------
+
+pick_spawner()
+{
+	list = getspawnerteamarray( "allies" );
+	best = undefined;
+	bestscore = -1;
+	for ( i = 0; i < list.size; i++ )
+	{
+		sp = list[ i ];
+		// prefer anonymous spawners: named ones can be waited on by the level's own scripts
+		score = 1;
+		if ( !isdefined( sp.targetname ) )
+			score += 2;
+		if ( !isdefined( sp.script_noteworthy ) )
+			score += 2;
+		if ( !isdefined( sp.script_friendname ) )
+			score += 1;
+		// a soldier with a rifle, not a pilot, civilian or scripted VIP model
+		cn = tolower( sp.classname );
+		if ( issubstr( cn, "pilot" ) || issubstr( cn, "civilian" ) || issubstr( cn, "vip" ) || issubstr( cn, "price" ) || issubstr( cn, "gaz" ) )
+			score -= 10;
+		if ( issubstr( cn, "m4" ) || issubstr( cn, "m16" ) || issubstr( cn, "ak" ) || issubstr( cn, "g3" ) || issubstr( cn, "mp5" ) || issubstr( cn, "saw" ) || issubstr( cn, "rifle" ) )
+			score += 3;
+		if ( score > bestscore )
+		{
+			best = sp;
+			bestscore = score;
+		}
+	}
+	return best;
+}
+
+spawn_real_bot( slot, idx )
+{
+	c = level.coop;
+	wait 1; // let the level finish spawning its own squad first
+	sp = pick_spawner();
+	if ( !isdefined( sp ) )
+	{
+		maps\_coop::log( "bot " + slot + ": no friendly spawner in " + level.script + ", using the scripted bot" );
+		return undefined;
+	}
+	p = level.player;
+	// the host may still be dropping into the level: wait until they stand on something
+	for ( i = 0; i < 100 && !( p isonground() ); i++ )
+		wait 0.05;
+	pa = p getplayerangles();
+	pos = node_near( spot_behind_host( idx ), p.origin );
+	org = sp.origin;
+	ang = sp.angles;
+	cnt = sp.count;
+	sp.origin = pos;
+	sp.angles = ( 0, pa[ 1 ], 0 );
+	sp.count = 1;
+	guy = sp stalingradspawn();
+	sp.origin = org;
+	sp.angles = ang;
+	sp.count = cnt;
+	if ( spawn_failed( guy ) )
+	{
+		maps\_coop::log( "bot " + slot + ": spawn failed, using the scripted bot" );
+		return undefined;
+	}
+	guy.team = "allies";
+	guy.name = c.names[ slot ];
+	guy.coop_bot_slot = slot;
+	guy thread magic_bullet_shield();
+	guy thread disable_ai_color();
+	guy.fixednode = false; // free to path anywhere, not just to cover nodes
+	guy.goalradius = 160 + idx * 48;
+	guy setgoalpos( p.origin ); // never setgoalentity( player ): fatal unless the player is on a friendly chain
+	c.bot_ai[ slot ] = guy;
+	maps\_coop::log( "bot " + slot + ": real AI '" + guy.classname + "' from spawner at " + org );
+	return guy;
+}
+
+bot_ai_think( slot, idx, guy )
+{
+	c = level.coop;
+	p = level.player;
+	b = spawnstruct();
+	b.origin = guy.origin;
+	last = guy.origin;
+	weapon = "";
+	revive_start = undefined;
+	tick = 0;
+	still_since = gettime();
+	still_at = guy.origin;
+	for ( ;; )
+	{
+		if ( !isdefined( guy ) || !isalive( guy ) )
+		{
+			c.bot_ai[ slot ] = undefined;
+			return;
+		}
+		// frozen by the level (it never moves although the host is far): hand over to the scripted bot
+		if ( distance( guy.origin, still_at ) > 16 || distance( guy.origin, p.origin ) < 400 || isdefined( c.hidden ) || maps\_coop::player_linked() )
+		{
+			still_at = guy.origin;
+			still_since = gettime();
+		}
+		else if ( gettime() - still_since > 5000 )
+		{
+			maps\_coop::log( "bot " + slot + ": real AI does not move in " + level.script + ", using the scripted bot" );
+			c.bot_ai_frozen = true;
+			c.bot_ai[ slot ] = undefined;
+			guy stop_magic_bullet_shield();
+			guy delete();
+			return;
+		}
+		tick++;
+		now = gettime();
+		if ( tick % 20 == 1 && isdefined( guy.weapon ) && ( guy.weapon != weapon || tick % 100 == 1 ) )
+		{
+			weapon = guy.weapon;
+			bot_send( slot, "W|" + weapon );
+		}
+		linked = isdefined( c.hidden ) || maps\_coop::player_linked();
+		d = distance( guy.origin, p.origin );
+		// left behind (host teleported or rode away): rejoin once the host is on foot again
+		if ( !linked && d > 1500 )
+			guy teleport( spot_behind_host( idx ), ( 0, guy.angles[ 1 ], 0 ) );
+		// host down: go to them and revive, like a medic; then follow again
+		if ( c.down )
+		{
+			guy.goalradius = 40;
+			guy setgoalpos( p.origin );
+			if ( d < 80 )
+			{
+				if ( !isdefined( revive_start ) )
+					revive_start = now;
+				if ( now - revive_start > 3000 )
+				{
+					bot_send( slot, "V|" + c.slot );
+					revive_start = undefined;
+				}
+			}
+		}
+		else
+		{
+			if ( isdefined( revive_start ) || guy.goalradius == 40 )
+			{
+				revive_start = undefined;
+				guy.goalradius = 160 + idx * 48;
+			}
+			// the level's spawn logic sets a huge goal radius (= "already there, stand still"): keep ours
+		if ( !c.down && guy.goalradius != 160 + idx * 48 )
+			guy.goalradius = 160 + idx * 48;
+		// follow: re-target where the host is when they have moved off (the stock friendly follow does the same)
+			if ( tick % 4 == 0 && ( !isdefined( guy.coop_goal ) || distance( guy.coop_goal, p.origin ) > 64 ) )
+			{
+				guy.coop_goal = p.origin;
+				guy setgoalpos( p.origin );
+			}
+		}
+		if ( tick % 20 == 0 && getdvar( "coop_debug" ) == "1" )
+			maps\_coop::log( "botai " + slot + " at " + guy.origin + " host " + p.origin + " d " + int( d ) + " goalradius " + guy.goalradius + " fixednode " + guy.fixednode + " ignoreall " + guy.ignoreall + " pose " + guy.a.pose + " move " + guy.a.movement );
+		// pose for remote friends (the host sees the real AI; the bot slot's puppet stays hidden here)
+		vel = vectorscale( guy.origin - last, 20 );
+		last = guy.origin;
+		b.origin = guy.origin;
+		stance = 0;
+		if ( isdefined( guy.a ) && isdefined( guy.a.pose ) )
+		{
+			if ( guy.a.pose == "crouch" )
+				stance = 1;
+			else if ( guy.a.pose == "prone" )
+				stance = 2;
+		}
+		flags = stance;
+		if ( linked )
+			flags += 32;
+		flags += maps\_coop_puppet::gait_bits( vel, guy.angles[ 1 ] );
+		bot_pose( slot, b, flags, 0, guy.angles[ 1 ] );
+		wait 0.05;
+	}
+}
+
+// the closest pathfinding node to want (AI must stand on the navigation graph), within reach of the host
+node_near( want, host )
+{
+	nodes = getallnodes();
+	best = undefined;
+	bestd = 999999;
+	for ( i = 0; i < nodes.size; i++ )
+	{
+		o = nodes[ i ].origin;
+		if ( abs( o[ 2 ] - host[ 2 ] ) > 80 )
+			continue;
+		d = distancesquared( o, want );
+		if ( d < bestd && distancesquared( o, host ) > 48 * 48 )
+		{
+			best = o;
+			bestd = d;
+		}
+	}
+	if ( !isdefined( best ) || bestd > 600 * 600 )
+		return want;
+	return best;
 }

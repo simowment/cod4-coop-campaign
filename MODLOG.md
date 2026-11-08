@@ -108,3 +108,13 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
   the network pose minus one frame of root motion. Body stays within 4.5 (walk) / 9 (run) units, no drift.
 - `bash tools/botdemo_test.sh <out> killhouse start botfollow`: host glides backwards facing the bot at
   walk/run/sprint, bot chases with its real brain, per-frame screenshots + stats, ~25 s.
+
+## Bot = real campaign AI (2026-11-09)
+- Host spawns the bot as a real actor from one of the level's friendly spawners (stock makerealai trick:
+  move spawner, stalingradspawn, restore). Prefers anonymous rifle-soldier spawners. magic_bullet_shield,
+  disable_ai_color, fixednode false, spawned on the nearest path node once the host has landed.
+- Follow with setgoalpos(host) every 0.2 s; setgoalentity(player) is FATAL ("not on a friendly chain").
+  The spawn logic resets goalradius to 2048 (= stand still): enforced every tick.
+- Host hides the bot slot's puppet; remote friends get the AI's pose (gait from its velocity).
+- Killhouse holds its AI still: after 5 s without moving the AI is removed and the scripted bot takes over.
+- Verified: bog_a follow (walk/run/sprint, crouches by itself), killhouse fallback, no script errors.
