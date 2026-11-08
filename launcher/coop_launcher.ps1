@@ -152,9 +152,27 @@ $settings = @{ name = $env:USERNAME; mission = "cargoship"; squad = 2; bots = 0;
 if (Test-Path $SettingsFile) { try { (Get-Content $SettingsFile -Raw | ConvertFrom-Json).psobject.Properties | ForEach-Object { $settings[$_.Name] = $_.Value } } catch {} }
 function Save-Settings { try { $settings | ConvertTo-Json | Set-Content -Path $SettingsFile -Encoding UTF8 } catch {} }
 
+# A windowed game whose saved position is off every screen (or with mouse input off) looks like it never started.
+function Get-WindowFix {
+    $fix = "+set in_mouse 1"
+    $cfg = Get-ChildItem (Join-Path $GameDir "players\profiles\*\config.cfg") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $cfg) { return $fix }
+    $t = Get-Content $cfg.FullName -Raw
+    $x = 3; $y = 22
+    if ($t -match 'seta vid_xpos "(-?\d+)"') { $x = [int]$Matches[1] }
+    if ($t -match 'seta vid_ypos "(-?\d+)"') { $y = [int]$Matches[1] }
+    $onScreen = $false
+    foreach ($s in [System.Windows.Forms.Screen]::AllScreens) {
+        $b = $s.WorkingArea
+        if ($x -ge $b.Left -and $x -le $b.Right - 200 -and $y -ge $b.Top -and $y -le $b.Bottom - 200) { $onScreen = $true }
+    }
+    if (-not $onScreen) { $fix += " +set vid_xpos 3 +set vid_ypos 22" }
+    return $fix
+}
+
 function Start-Game([string]$extra) {
     $name = $settings.name -replace '[|~"]', ''
-    $args = "+set fs_game mods/coop +set loc_warnings 0 +set coop_name `"$name`" $extra"
+    $args = "+set fs_game mods/coop +set loc_warnings 0 +set coop_name `"$name`" $(Get-WindowFix) $extra"
     return Start-Process -FilePath (Join-Path $GameDir "iw3sp.exe") -WorkingDirectory $GameDir -ArgumentList $args -PassThru
 }
 

@@ -7,6 +7,10 @@ param([string]$Op, [string]$Tag = "0", [string]$Arg = "", [double]$Scale = 0.6)
 $game = "C:\Users\got\Downloads\Call.of.Duty.4.Modern.Warfare\Call of Duty 4-Modern Warfare"
 switch ($Op) {
   "launch" {
+    # test dvars (window size/position, in_mouse 0) are archived into the player's profile: back it up once
+    Get-ChildItem "$game\players\profiles\*\config.cfg" -ErrorAction SilentlyContinue | ForEach-Object {
+      if (-not (Test-Path "$($_.FullName).coop_test")) { Copy-Item $_.FullName "$($_.FullName).coop_test" }
+    }
     $a = "allowdupe +set coop_background 1 +set in_mouse 0 +set loc_warnings 0 +set coop_tag $Tag +set r_fullscreen 0 +set r_mode 800x600 +set com_maxfps 60 +set vid_xpos 1920 +set vid_ypos 0 +set logfile 2 $Arg"
     $p = Start-Process -FilePath "$game\iw3sp.exe" -WorkingDirectory $game -ArgumentList $a -PassThru
     "pid=$($p.Id)"
@@ -27,5 +31,13 @@ switch ($Op) {
     $out.Save($Arg, [System.Drawing.Imaging.ImageFormat]::Png); $img.Dispose()
     "saved $Arg"
   }
-  "kill" { Stop-Process -Id ([int]$Tag) -Force; "killed" }
+  "kill" {
+    Stop-Process -Id ([int]$Tag) -Force; Start-Sleep -Milliseconds 800
+    if (-not (Get-Process iw3sp -ErrorAction SilentlyContinue)) {
+      Get-ChildItem "$game\players\profiles\*\config.cfg.coop_test" -ErrorAction SilentlyContinue | ForEach-Object {
+        Move-Item $_.FullName ($_.FullName -replace '\.coop_test$', '') -Force
+      }
+      "killed, player config restored"
+    } else { "killed (other instances still running; config restored by the last kill)" }
+  }
 }
