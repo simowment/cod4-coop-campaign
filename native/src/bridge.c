@@ -14,6 +14,7 @@
 #include "net.h"
 
 int g_forceUnpause = 1;
+static int g_as = -1; /* openfile("coop","as",slot): the next fprintln/fprintfields speaks for that bot slot */
 
 static int is_coop_arg0(void)
 {
@@ -55,6 +56,9 @@ static void bi_openfile(void)
 	if (!strcmp(cmd, "barrier")) { scr_add_int(net_barrier()); return; }
 	/* level time heartbeat; returns the previous value. A smaller value than last time means a save was loaded */
 	if (!strcmp(cmd, "tick")) { static int last; int prev = last; last = iarg; scr_add_int(prev); return; }
+	if (!strcmp(cmd, "bots")) { scr_add_int(net_bot_mask()); return; }
+	if (!strcmp(cmd, "isbot")) { scr_add_int(net_is_bot(iarg)); return; }
+	if (!strcmp(cmd, "as")) { g_as = net_is_bot(iarg) ? iarg : -1; scr_add_int(g_as >= 0); return; }
 	if (!strcmp(cmd, "version")) { scr_add_string(COOP_NATIVE_VERSION); return; }
 	scr_add_int(-2);
 }
@@ -71,6 +75,7 @@ static void bi_fprintln(void)
 	if (scr_nparams() != 1 || scr_type(0) != VT_STRING) { scr_add_int(0); return; }
 	strlcpy_(txt, scr_str(0), sizeof txt);
 	net_tick();
+	if (g_as >= 0) { int s = g_as; g_as = -1; scr_add_int(net_bot_event(s, txt)); return; }
 	scr_add_int(net_send_event(txt));
 }
 
@@ -89,6 +94,7 @@ static void bi_fprintfields(void)
 	p.x = scr_float(0); p.y = scr_float(1); p.z = scr_float(2);
 	p.pitch = scr_float(3); p.yaw = scr_float(4);
 	p.flags = scr_int(5); p.health = scr_int(6); p.weapon = scr_int(7);
+	if (g_as >= 0) { net_bot_pose(g_as, &p); g_as = -1; return; }
 	net_set_pose(&p);
 }
 

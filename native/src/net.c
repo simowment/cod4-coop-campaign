@@ -85,6 +85,7 @@ static struct {
 	double hostOffset; int haveHostOffset;
 	int barrier; double barrierStart; double pendingSince;
 	int minPlayers; int levelsLoaded;
+	u32 botMask; /* host-side AI squadmates: connected slots with no link, driven by host GSC */
 } N;
 
 static int seq_gt(u16 a, u16 b) { return (s16)(a - b) > 0; }
@@ -282,6 +283,7 @@ static void host_check_barrier(void)
 		if (stricmp_(N.slots[s].readyMap, N.localMap) != 0) return;
 		ready++;
 	}
+	for (int s = 1; s < NET_MAX_PLAYERS; s++) if (N.botMask & (1u << s)) ready++;
 	/* lobby: the first mission waits until coop_wait players are in */
 	if (N.levelsLoaded <= 1 && ready < N.minPlayers) return;
 	char t[96]; fmt(t, sizeof t, "~GO|%s", N.localMap);
@@ -358,7 +360,7 @@ static void on_packet(u8 *buf, int len, sockaddr_in *from)
 			for (int i = 1; i < N.maxPlayers; i++) if (N.links[i].used && addr_eq(&N.links[i].addr, from)) s = i;
 			if (s > 0 && N.links[s].lastIn) { host_drop(s, "rejoin"); s = -1; }
 			int fresh = 0;
-			if (s < 0) for (int i = 1; i < N.maxPlayers; i++) if (!N.links[i].used) { s = i; fresh = 1; break; }
+			if (s < 0) for (int i = 1; i < N.maxPlayers; i++) if (!N.links[i].used && !(N.botMask & (1u << i))) { s = i; fresh = 1; break; }
 			u8 out[96]; PktHdr *o = (PktHdr *)out;
 			if (s < 0) { fill_hdr(o, PT_REJECT, 0, 0); sendto_addr(from, out, sizeof(PktHdr)); return; }
 			if (fresh) {
@@ -524,6 +526,11 @@ void net_init(void)
 		N.session = (u32)(now_ms() * 7919.0) ^ GetTickCount() ^ 0x5eed1234u;
 		N.slots[0].connected = 1; strlcpy_(N.slots[0].name, N.localName, 32);
 		logf("net: hosting on UDP %u, max %d players, session %x", (u32)N.port, N.maxPlayers, N.session);
+		if (cmdline_get("coop_bot", v, sizeof v)) {
+			int nb = atoi_(v);
+			static const char *names[] = { "Gaz (bot)", "Griggs (bot)", "Price (bot)" };
+			for (int i = 0; i < nb && i < 3; i++) net_bot_add(names[i]);
+		}
 	} else {
 		if (!resolve(conn, &N.hostAddr, N.port)) { logf("net: cannot resolve '%s'", conn); N.configured = 0; return; }
 		N.localSlot = -1;
@@ -720,3 +727,47 @@ void net_set_map(const char *map, const char *start, int skill)
 }
 int net_barrier(void) { return net_active() && N.barrier; }
 const char *net_host_map(void) { return N.host ? N.localMap : N.hostMap; }
+
+/* ---- bots: AI squadmates hosted by the host. A bot is a connected slot with no network link; host GSC
+   computes its pose and its events, and the host relays both to real clients like any other player. ---- */
+int net_bot_add(const char *name)
+{
+	if (!N.configured || !N.host) return -1;
+	for (int s = 1; s < N.maxPlayers; s++) {
+		if (N.links[s].used || (N.botMask & (1u << s))) continue;
+		N.botMask |= 1u << s;
+		Slot *sl = &N.slots[s];
+		sl->connected = 1; sl->count = 0; sl->haveOffset = 0;
+		strlcpy_(sl->name, name, sizeof sl->name);
+		logf("net: bot '%s' in slot %d", name, s);
+		char t[96];
+		fmt(t, sizeof t, "~JOIN|%d|%s", s, sl->name); broadcast_from(0, t, -1);
+		fmt(t, sizeof t, "J|%d|%s", s, sl->name); sys_event(t);
+		host_check_barrier();
+		return s;
+	}
+	return -1;
+}
+
+int net_is_bot(int s) { return s > 0 && s < NET_MAX_PLAYERS && (N.botMask & (1u << s)) != 0; }
+int net_bot_mask(void) { return net_active() && N.host ? (int)N.botMask : 0; }
+
+void net_bot_pose(int s, const Pose *p)
+{
+	if (!net_is_bot(s)) return;
+	WirePose w;
+	u32 t = (u32)now_ms();
+	Slot *sl = &N.slots[s];
+	if (sl->count && (s32)(t - sl->s[(sl->head + sl->count - 1) & 15].remoteT) <= 0) t = sl->s[(sl->head + sl->count - 1) & 15].remoteT + 1;
+	pose_to_wire(&w, s, p, t);
+	slot_add_sample(s, &w);
+}
+
+int net_bot_event(int s, const char *txt)
+{
+	if (!net_is_bot(s) || !net_active() || !txt[0] || txt[0] == '~') return 0;
+	char o[8]; fmt(o, sizeof o, "%d", s);
+	inq_push(o, txt);            /* the host's own GSC sees it as coming from that slot */
+	broadcast_from(s, txt, -1);  /* and every real client too */
+	return 1;
+}

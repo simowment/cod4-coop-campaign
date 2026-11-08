@@ -35,3 +35,10 @@ int net_pop_event(char *out, int cap); /* "<origin>|<payload>"; system events us
 void net_set_map(const char *map, const char *start, int skill);     /* the local level that just loaded */
 const char *net_host_map(void);
 int net_barrier(void);             /* 1 while waiting for everyone to load the level */
+
+/* AI squadmates hosted by the host (coop_bot N on the host's command line) */
+int net_bot_add(const char *name);  /* returns the slot or -1 */
+int net_is_bot(int slot);
+int net_bot_mask(void);             /* bit per bot slot (host only) */
+void net_bot_pose(int slot, const Pose *p);
+int net_bot_event(int slot, const char *txt);

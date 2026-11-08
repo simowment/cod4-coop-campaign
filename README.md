@@ -21,6 +21,17 @@ checkpoints and failures stay in sync.
 4. Each friend's game loads the host's mission by itself. The mission waits on *"Waiting for your squad to
    load..."* until everyone is in, and then everyone starts on the same frame.
 
+### Playing with bots
+
+Set **Bots** (0–3) on the host tab to add AI squadmates. They join the lobby right away and count toward
+*Wait for*, so **Wait for 2 + Bots 1** starts at once, and friends can still join the free slots.
+
+A bot runs inside the host's game and looks like any other squadmate: animated soldier, name tag, squad
+HUD. It follows you along the path you walked, matches your stance, shoots enemies it can see (real
+bullets, short bursts), and revives you about 3 seconds after you go down. During rides and rigs it rides
+along out of sight. Friends who join see your bots too. A bot never goes down, never triggers story
+events and never holds up a sync point; it doesn't use grenades or launchers.
+
 ### How the connection works
 
 - The game uses **UDP port 28970** on the host.

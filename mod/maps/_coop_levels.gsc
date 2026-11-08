@@ -277,8 +277,8 @@ everyone_here( st )
 	c = level.coop;
 	for ( s = 0; s < c.max; s++ )
 	{
-		if ( s == c.slot || !maps\_coop::slot_connected( s ) )
-			continue;
+		if ( s == c.slot || !maps\_coop::slot_connected( s ) || maps\_coop_bot::is_bot( s ) )
+			continue; // bots follow the host, they never hold a sync point
 		if ( !isdefined( st.here[ s ] ) )
 			return false;
 	}

@@ -92,6 +92,7 @@ postinit()
 	thread watch_death();
 	maps\_coop_player::init();
 	maps\_coop_puppet::init();
+	maps\_coop_bot::init();
 	log( "postinit: " + c.trig_count + " triggers, " + c.spawner_count + " spawners" );
 }
 
@@ -214,6 +215,25 @@ test_command()
 		}
 		else
 			log( "test kill: no axis with an id (" + ai.size + " axis alive)" );
+	}
+	else if ( v == "nearaxis" )
+	{
+		// move next to the nearest living enemy (bot combat tests)
+		ai = getaiarray( "axis" );
+		best = undefined;
+		for ( i = 0; i < ai.size; i++ )
+			if ( isalive( ai[ i ] ) && ( !isdefined( best ) || distance( ai[ i ].origin, level.player.origin ) < distance( best.origin, level.player.origin ) ) )
+				best = ai[ i ];
+		if ( isdefined( best ) )
+		{
+			dir = vectornormalize( level.player.origin - best.origin );
+			spot = best.origin + vectorscale( ( dir[ 0 ], dir[ 1 ], 0 ), 400 );
+			tr = bullettrace( spot + ( 0, 0, 64 ), spot - ( 0, 0, 200 ), false, undefined );
+			level.player setorigin( tr[ "position" ] );
+			log( "test nearaxis: moved to " + tr[ "position" ] + " enemy at " + best.origin );
+		}
+		else
+			log( "test nearaxis: no axis" );
 	}
 	else if ( v == "hurt" )
 		level.player dodamage( level.player.health - 1, level.player.origin );
@@ -346,6 +366,8 @@ update_linked()
 	else
 		c.link_score = max( c.link_score - 1, 0 );
 	c.linked = c.link_score >= 4;
+	if ( getdvar( "coop_test_nolink" ) == "1" )
+		c.linked = false; // tests: a teleported, input-less player never lands
 }
 
 player_linked()

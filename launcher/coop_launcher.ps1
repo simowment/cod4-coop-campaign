@@ -148,7 +148,7 @@ $Missions = [ordered]@{
     "Game Over (jeepride)" = "jeepride"; "Mile High Club (airplane)" = "airplane"
 }
 
-$settings = @{ name = $env:USERNAME; mission = "cargoship"; squad = 2; lastCode = "" }
+$settings = @{ name = $env:USERNAME; mission = "cargoship"; squad = 2; bots = 0; lastCode = "" }
 if (Test-Path $SettingsFile) { try { (Get-Content $SettingsFile -Raw | ConvertFrom-Json).psobject.Properties | ForEach-Object { $settings[$_.Name] = $_.Value } } catch {} }
 function Save-Settings { try { $settings | ConvertTo-Json | Set-Content -Path $SettingsFile -Encoding UTF8 } catch {} }
 
@@ -180,11 +180,14 @@ if (-not $cmbMis.SelectedItem) { $cmbMis.SelectedIndex = 1 }
 $lblSq = New-Object System.Windows.Forms.Label; $lblSq.Text = "Wait for"; $lblSq.Location = "12,52"; $lblSq.AutoSize = $true
 $numSq = New-Object System.Windows.Forms.NumericUpDown; $numSq.Location = "100,49"; $numSq.Width = 50; $numSq.Minimum = 1; $numSq.Maximum = 4; $numSq.Value = [int]$settings.squad
 $lblSq2 = New-Object System.Windows.Forms.Label; $lblSq2.Text = "players before the mission starts"; $lblSq2.Location = "156,52"; $lblSq2.AutoSize = $true
-$btnHost = New-Object System.Windows.Forms.Button; $btnHost.Text = "Start hosting"; $btnHost.Location = "100,86"; $btnHost.Size = "160,34"
-$txtCodes = New-Object System.Windows.Forms.TextBox; $txtCodes.Multiline = $true; $txtCodes.ReadOnly = $true; $txtCodes.Location = "12,132"; $txtCodes.Size = "450,140"
+$lblBots = New-Object System.Windows.Forms.Label; $lblBots.Text = "Bots"; $lblBots.Location = "12,86"; $lblBots.AutoSize = $true
+$numBots = New-Object System.Windows.Forms.NumericUpDown; $numBots.Location = "100,83"; $numBots.Width = 50; $numBots.Minimum = 0; $numBots.Maximum = 3; $numBots.Value = [int]$settings.bots
+$lblBots2 = New-Object System.Windows.Forms.Label; $lblBots2.Text = "AI squadmates (they count toward the squad)"; $lblBots2.Location = "156,86"; $lblBots2.AutoSize = $true
+$btnHost = New-Object System.Windows.Forms.Button; $btnHost.Text = "Start hosting"; $btnHost.Location = "100,116"; $btnHost.Size = "160,34"
+$txtCodes = New-Object System.Windows.Forms.TextBox; $txtCodes.Multiline = $true; $txtCodes.ReadOnly = $true; $txtCodes.Location = "12,158"; $txtCodes.Size = "450,116"
 $txtCodes.Font = New-Object System.Drawing.Font("Consolas", 10); $txtCodes.Text = "Your join code appears here once you start hosting."
 $btnCopy = New-Object System.Windows.Forms.Button; $btnCopy.Text = "Copy join code"; $btnCopy.Location = "12,282"; $btnCopy.Size = "160,32"; $btnCopy.Enabled = $false
-$tabHost.Controls.AddRange(@($lblMis, $cmbMis, $lblSq, $numSq, $lblSq2, $btnHost, $txtCodes, $btnCopy))
+$tabHost.Controls.AddRange(@($lblMis, $cmbMis, $lblSq, $numSq, $lblSq2, $lblBots, $numBots, $lblBots2, $btnHost, $txtCodes, $btnCopy))
 
 # --- join tab
 $lblCode = New-Object System.Windows.Forms.Label; $lblCode.Text = "Join code"; $lblCode.Location = "12,16"; $lblCode.AutoSize = $true
@@ -203,7 +206,7 @@ $script:lanGames = @()
 
 $btnHost.Add_Click({
     $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
-    $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.squad = [int]$numSq.Value; Save-Settings
+    $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.squad = [int]$numSq.Value; $settings.bots = [int]$numBots.Value; Save-Settings
     $btnHost.Enabled = $false; $txtCodes.Text = "Opening the game port on your router..."; $form.Refresh()
     $addr = Get-LocalAddresses
     $lines = @()
@@ -229,7 +232,8 @@ $btnHost.Add_Click({
     }
     $txtCodes.Text = ($lines -join "`r`n")
     $btnCopy.Enabled = [bool]$script:mainCode
-    $script:hostingProc = Start-Game "+set coop_host 1 +set coop_wait $($settings.squad) +set coop_startmap $($settings.mission)"
+    $botArg = ""; if ($settings.bots -gt 0) { $botArg = "+set coop_bot $($settings.bots)" }
+    $script:hostingProc = Start-Game "+set coop_host 1 +set coop_wait $($settings.squad) $botArg +set coop_startmap $($settings.mission)"
 })
 
 $btnCopy.Add_Click({ if ($script:mainCode) { [System.Windows.Forms.Clipboard]::SetText($script:mainCode); $btnCopy.Text = "Copied!" } })

@@ -74,3 +74,14 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
 ## Test environment
 - The virtual monitor was removed again with `tools/vdd_uninstall.ps1` (2026-11-07). `tools/bg.ps1` places
   test instances at x=1920, so reinstall it first with `tools/vdd_install.ps1 <driver folder>`.
+
+## Bots (2026-11-08)
+- Host-side AI squadmates: `coop_bot N` on the host. The proxy gives each bot a connected slot with no link
+  (`botMask`): it counts as ready for the barrier and as a player for `coop_wait`, HELLO skips its slot, and
+  its pose/events are relayed to real clients. GSC drives it with `openfile("coop","as",slot)` + fprintfields/fprintln.
+- Brain: `mod/maps/_coop_bot.gsc` (follow the host's breadcrumb trail, match stance, shoot visible axis within
+  2200 units in 3-round bursts via the normal puppet shot replay, revive after 3 s, hide during rides).
+- Verified in game (bog_a, one instance): join + HUD + puppet with M4, revive (V|0 3 s after D|1), follow at
+  ~100 units, bot kills (target down after 3 shots; several more K events).
+- Test-only artifact: in background mode the input-less host never lands after a teleport, so ride detection
+  hides the bot. `+set coop_test_nolink 1` and test cmd `nearaxis` exist for this.
