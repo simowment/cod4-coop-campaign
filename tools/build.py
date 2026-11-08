@@ -85,12 +85,29 @@ def main():
             print('installed d3d9.dll proxy')
         except PermissionError:
             print('WARNING: d3d9.dll is in use (game running?) - proxy not updated')
-    for fn in os.listdir(os.path.join(ROOT, 'launcher')):
-        if fn.endswith('.bat') or fn.endswith('.ps1'):
-            txt = open(os.path.join(ROOT, 'launcher', fn), encoding='utf-8').read().replace('\r\n', '\n')
-            with open(os.path.join(a.game, fn), 'w', encoding='utf-8', newline='\r\n') as f:
-                f.write(txt)  # cmd.exe wants CRLF
-    print('installed launchers')
+    # One file for players: "CoD4 Coop.bat" = a small batch header that runs the rest of itself as PowerShell.
+    # cmd reads "<# :" as a no-op label line; PowerShell reads everything up to "#>" as a comment.
+    ps = open(os.path.join(ROOT, 'launcher', 'coop_launcher.ps1'), encoding='utf-8').read().replace('\r\n', '\n')
+    header = (
+        '<# :\n'
+        '@echo off\n'
+        'rem CoD4 Coop Campaign - double-click to host a game or join a friend. Everything is in this one file.\n'
+        'set "COOP_GAMEDIR=%~dp0"\n'
+        'set "COOP_SELF=%~f0"\n'
+        'start "" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command '
+        '"& ([scriptblock]::Create([IO.File]::ReadAllText($env:COOP_SELF)))"\n'
+        'exit /b\n'
+        '#>\n')
+    # cmd wants CRLF; ASCII only so cmd never sees a BOM before "<# :"
+    with open(os.path.join(a.game, 'CoD4 Coop.bat'), 'w', encoding='ascii', errors='replace', newline='\r\n') as f:
+        f.write(header + ps)
+    for old in ('Coop - Host.bat', 'Coop - Join.bat', 'coop_launcher.ps1'):  # earlier launcher layouts
+        try:
+            os.remove(os.path.join(a.game, old))
+            print('removed old ' + old)
+        except OSError:
+            pass
+    print('installed launcher: CoD4 Coop.bat')
     print('done ->', out)
 
 

@@ -5,7 +5,8 @@
 param([string]$Encode = "", [string]$Decode = "", [switch]$Discover, [string]$Probe = "")
 
 $ErrorActionPreference = "Stop"
-$GameDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# run as "CoD4 Coop.bat" (the build embeds this script in a batch file) or directly as a .ps1
+if ($env:COOP_GAMEDIR) { $GameDir = $env:COOP_GAMEDIR.TrimEnd([char]92) } else { $GameDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $Port = 28970
 $SettingsFile = Join-Path $GameDir "coop_launcher.json"
 

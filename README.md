@@ -12,7 +12,7 @@ checkpoints and failures stay in sync.
 
 ## Quick start
 
-1. Install the mod (see **Install**). This puts `CoD4 Coop.bat` next to `iw3sp.exe`.
+1. Install the mod (see **Install**). This puts a single file, `CoD4 Coop.bat`, next to `iw3sp.exe`: it is the whole launcher.
 2. **Host:** double-click `CoD4 Coop.bat`, enter your name, then **Host a game**. Pick a mission and how
    many players to wait for, and click **Start hosting**. Copy the **join code** (e.g. `2H092-T0W9A`) and send
    it to your friends.
@@ -91,11 +91,11 @@ python tools/build.py --game "C:/path/to/Call of Duty 4-Modern Warfare"
 ```
 
 This writes `Mods/coop/` (the stock scripts patched with the coop hooks, plus the coop scripts),
-`d3d9.dll`, `CoD4 Coop.bat` and `coop_launcher.ps1` into your game folder. The prebuilt `d3d9.dll` is
+`d3d9.dll` and `CoD4 Coop.bat` (the one-file launcher) into your game folder, and removes launcher files from older versions. The prebuilt `d3d9.dll` is
 attached to the GitHub release. Put it in `native/build/` before running the build, or build it yourself
 with `bash native/build.sh` (mingw `gcc`/`ld`/`dlltool`, freestanding PE32, no CRT).
 
-To uninstall, delete `d3d9.dll`, `Mods/coop`, `CoD4 Coop.bat` and `coop_launcher.ps1`.
+To uninstall, delete `d3d9.dll`, `Mods/coop` and `CoD4 Coop.bat`.
 
 ## Testing
 
