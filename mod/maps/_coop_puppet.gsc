@@ -156,6 +156,7 @@ spawn_puppet( slot )
 	p setmodel( c.character.model );
 	p useAnimTree( #animtree );
 	p makefakeai();
+	p notsolid(); // a squadmate never blocks you (it spawns right next to you)
 	for ( i = 0; i < c.character.attach_models.size; i++ )
 		p attach( c.character.attach_models[ i ], c.character.attach_tags[ i ], true );
 	p.team = "allies";
