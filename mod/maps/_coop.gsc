@@ -218,6 +218,15 @@ test_command()
 	}
 	else if ( v == "botdemo" )
 		level.coop.bot_demo = true;
+	else if ( v == "botfollow" )
+	{
+		for ( bs = 1; bs < level.coop.max; bs++ )
+			if ( maps\_coop_bot::is_bot( bs ) )
+			{
+				level thread maps\_coop_bot::follow_test( bs );
+				break;
+			}
+	}
 	else if ( v == "nearaxis" )
 	{
 		// move next to the nearest living enemy (bot combat tests)
@@ -337,6 +346,7 @@ send_pose()
 	if ( isdefined( level.coop.hidden ) || player_linked() )
 		flags += 32;
 	flags += ( level.coop.shots % 256 ) * 256;
+	flags += maps\_coop_puppet::gait_bits( p getvelocity(), a[ 1 ] );
 	hp = 0;
 	if ( isalive( p ) && p.maxhealth > 0 )
 		hp = int( p.health * 100 / p.maxhealth );

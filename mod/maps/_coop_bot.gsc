@@ -176,6 +176,13 @@ bot_think( slot, idx )
 
 	for ( ;; )
 	{
+		if ( isdefined( c.bot_place ) )
+		{
+			b.origin = c.bot_place;
+			c.bot_place = undefined;
+			b.trail = [];
+			b.speed = 0;
+		}
 		if ( isdefined( c.bot_demo ) )
 		{
 			c.bot_demo = undefined;
@@ -267,25 +274,28 @@ bot_think( slot, idx )
 					goal = p.origin;
 				// pace like a person: walk to close a small gap, run for a bigger one, sprint to catch up,
 				// and never slower than the host is moving (speeds match the puppet's walk/run/sprint anims)
+				// only the anims' natural speeds (walk / run / sprint), so the body's root motion matches
+				sp = level.coop.anim_speed;
 				gap = d - spacing;
-				want = 100;
-				if ( gap > 140 )
-					want = 185;
-				if ( gap > 450 )
-					want = 250;
 				hv = length( p getvelocity() );
-				if ( hv > want )
-					want = hv;
-				if ( want > 260 )
-					want = 260;
+				want = sp[ "walk_f" ];
+				if ( gap > 140 || hv > sp[ "walk_f" ] * 1.15 )
+					want = sp[ "run_f" ];
+				if ( gap > 450 || hv > sp[ "run_f" ] * 1.15 )
+					want = sp[ "sprint" ];
+				if ( p getstance() == "crouch" )
+					want = sp[ "crouch_f" ];
+				else if ( p getstance() == "prone" )
+					want = sp[ "crawl" ];
 			}
 		}
 
 		// accelerate and brake smoothly instead of jumping between standing and running
+		// reach the gait speed within ~0.15 s: in-between speeds would not match any anim's own motion
 		if ( b.speed < want )
-			b.speed = min( want, b.speed + 30 );
+			b.speed = min( want, b.speed + 80 );
 		else
-			b.speed = max( want, b.speed - 45 );
+			b.speed = max( want, b.speed - 90 );
 
 		moving = false;
 		if ( b.speed > 5 )
@@ -389,6 +399,10 @@ bot_think( slot, idx )
 		if ( firing )
 			flags += 8;
 		flags += ( b.shots % 256 ) * 256;
+		vel = ( 0, 0, 0 );
+		if ( moving && isdefined( b.move_dir ) )
+			vel = vectorscale( b.move_dir, b.speed );
+		flags += bot_gait( vel, b.yaw );
 		bot_pose( slot, b, flags, b.pitch, b.yaw );
 		wait 0.05;
 	}
@@ -409,7 +423,7 @@ debug_axis( slot, b )
 		if ( sighttracepassed( bot_eye( b ), axis[ i ] geteye(), false, level.coop.puppets[ slot ] ) )
 			seen++;
 	}
-	maps\_coop::log( "bot " + slot + " at " + b.origin + " axis " + axis.size + " nearest " + int( near ) + " visible " + seen + " shots " + b.shots );
+	maps\_coop::log( "bot " + slot + " at " + b.origin + " axis " + axis.size + " nearest " + int( near ) + " visible " + seen + " shots " + b.shots + " reanchors " + level.coop.reanchors );
 }
 
 // turn from a toward b by at most maxStep degrees (smooth body turns; the puppet re-anchors on every turn > 2)
@@ -465,25 +479,31 @@ bot_demo( slot, b )
 	ph[ ph.size ] = "stand_idle|0|0|0|still";
 	ph[ ph.size ] = "stand_aim|0|4|0|still";
 	ph[ ph.size ] = "stand_fire|0|12|0|still";
-	ph[ ph.size ] = "walk_f|0|0|100|across";
-	ph[ ph.size ] = "walk_strafe|0|0|100|strafe";
-	ph[ ph.size ] = "walk_b|0|0|100|away";
-	ph[ ph.size ] = "run_f|0|0|185|across";
-	ph[ ph.size ] = "run_strafe|0|0|185|strafe";
-	ph[ ph.size ] = "run_b|0|0|185|away";
-	ph[ ph.size ] = "sprint|0|0|250|across";
+	ph[ ph.size ] = "walk_f|0|0|walk_f|across";
+	ph[ ph.size ] = "walk_strafe|0|0|walk_l|strafe";
+	ph[ ph.size ] = "walk_b|0|0|walk_b|away";
+	ph[ ph.size ] = "run_f|0|0|run_f|across";
+	ph[ ph.size ] = "run_strafe|0|0|run_l|strafe";
+	ph[ ph.size ] = "run_b|0|0|run_b|away";
+	ph[ ph.size ] = "sprint|0|0|sprint|across";
 	ph[ ph.size ] = "crouch_idle|1|0|0|still";
 	ph[ ph.size ] = "crouch_aim|1|4|0|still";
-	ph[ ph.size ] = "crouch_walk|1|0|90|across";
+	ph[ ph.size ] = "crouch_walk|1|0|crouch_f|across";
 	ph[ ph.size ] = "prone|2|0|0|still";
-	ph[ ph.size ] = "crawl|2|0|40|across";
+	ph[ ph.size ] = "crawl|2|0|crawl|across";
 	ph[ ph.size ] = "downed|2|16|0|still";
 	for ( i = 0; i < ph.size; i++ )
 	{
 		t = strtok( ph[ i ], "|" );
 		stance = int( t[ 1 ] );
 		flags = int( t[ 2 ] );
-		speed = int( t[ 3 ] );
+		speed = 0;
+		if ( t[ 3 ] != "0" )
+			speed = level.coop.anim_speed[ t[ 3 ] ];
+		r0 = level.coop.reanchors;
+		steps = [];
+		pup = level.coop.puppets[ slot ];
+		last = undefined;
 		mode = t[ 4 ];
 		maps\_coop::log( "botdemo " + t[ 0 ] );
 		off = -70;
@@ -523,10 +543,139 @@ bot_demo( slot, b )
 			if ( ( flags & 8 ) != 0 )
 				fire_yaw = yaw + 50; // replayed shots toward the camera are suppressed; aim to the side
 			bot_pose( slot, b, f, 0, fire_yaw );
+			if ( isdefined( pup ) )
+			{
+				if ( isdefined( last ) && k > 10 )
+					steps[ steps.size ] = distance( ( pup.origin[ 0 ], pup.origin[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
+				last = pup.origin;
+			}
 			if ( k == 25 || k == 45 )
 				openfile( "coop", "shot", t[ 0 ] + "_" + k ); // test mode only: the proxy saves this frame
 			wait 0.05;
 		}
+		step_stats( t[ 0 ], steps, level.coop.reanchors - r0 );
 	}
 	maps\_coop::log( "botdemo done" );
+}
+
+// per-frame body movement of the puppet: smooth motion = steps all close to speed * 0.05
+step_stats( name, steps, reanchors )
+{
+	if ( steps.size == 0 )
+		return;
+	sum = 0;
+	mx = 0;
+	mn = 9999;
+	for ( i = 0; i < steps.size; i++ )
+	{
+		sum += steps[ i ];
+		mx = max( mx, steps[ i ] );
+		mn = min( mn, steps[ i ] );
+	}
+	avg = sum / steps.size;
+	dev = 0;
+	for ( i = 0; i < steps.size; i++ )
+		dev += abs( steps[ i ] - avg );
+	dev = dev / steps.size;
+	maps\_coop::log( "botstats " + name + " step avg " + avg + " min " + mn + " max " + mx + " meandev " + dev + " reanchors " + reanchors );
+}
+
+// the bot moves at exactly the anims' own speeds (walk 90 / run 181 / sprint 198 in this game), which sit
+// below the human thresholds in gait_bits, so classify by which gait speed it is using
+bot_gait( vel, yaw )
+{
+	v = length( ( vel[ 0 ], vel[ 1 ], 0 ) );
+	sp = level.coop.anim_speed;
+	if ( v < 15 )
+		return 65536;
+	g = 1;
+	if ( v > ( sp[ "walk_f" ] + sp[ "run_f" ] ) * 0.5 )
+		g = 2;
+	if ( v > ( sp[ "run_f" ] + sp[ "sprint" ] ) * 0.5 )
+		g = 3;
+	va = vectortoangles( ( vel[ 0 ], vel[ 1 ], 0 ) );
+	rel = maps\_coop_puppet::angle180( va[ 1 ] - yaw );
+	dir = 0;
+	if ( rel > 135 || rel < -135 )
+		dir = 1;
+	else if ( rel > 45 )
+		dir = 2;
+	else if ( rel < -45 )
+		dir = 3;
+	if ( g == 3 && dir != 0 )
+		g = 2;
+	return ( 1 + g * 4 + dir ) * 65536;
+}
+
+// ---------------------------------------------------------------------------------------------
+// follow test (test cmd "botfollow"): the host glides backwards in a straight line facing the bot,
+// at walk, run and sprint speed, then stops; the real bot brain chases. Logs per-segment smoothness
+// ("botstats follow_<seg>") and takes timed screenshots. Test mode only (moves the player by script).
+// ---------------------------------------------------------------------------------------------
+
+follow_test( slot )
+{
+	c = level.coop;
+	p = level.player;
+	best = 0;
+	bestd = -1;
+	for ( y = 0; y < 360; y += 15 )
+	{
+		dir = anglestoforward( ( 0, y, 0 ) );
+		d = 1000;
+		for ( dy = -10; dy <= 10; dy += 10 )
+		{
+			tr = bullettrace( p.origin + ( 0, 0, 30 ), p.origin + ( 0, 0, 30 ) + vectorscale( anglestoforward( ( 0, y + dy, 0 ) ), 1000 ), true, p );
+			d = min( d, tr[ "fraction" ] * 1000 );
+		}
+		if ( d > bestd )
+		{
+			bestd = d;
+			best = y;
+		}
+	}
+	dir = anglestoforward( ( 0, best, 0 ) );
+	look = ( 8, best + 180, 0 );
+	maps\_coop::log( "botfollow dir " + best + " room " + int( bestd ) );
+	p setplayerangles( look );
+	c.bot_place = ground_at( p.origin - vectorscale( dir, 110 ) );
+	wait 1;
+	segs = [];
+	segs[ segs.size ] = "walk|90|50";
+	segs[ segs.size ] = "run|185|40";
+	segs[ segs.size ] = "sprint|230|30";
+	segs[ segs.size ] = "stop|0|40";
+	room = bestd - 60;
+	moved = 0;
+	for ( i = 0; i < segs.size; i++ )
+	{
+		t = strtok( segs[ i ], "|" );
+		speed = int( t[ 1 ] );
+		frames = int( t[ 2 ] ); // server frames (20 per second)
+		steps = [];
+		r0 = c.reanchors;
+		last = undefined;
+		maps\_coop::log( "botfollow " + t[ 0 ] );
+		for ( k = 0; k < frames; k++ )
+		{
+			if ( moved + speed * 0.05 < room )
+			{
+				moved += speed * 0.05;
+				p setorigin( ground_at( p.origin + vectorscale( dir, speed * 0.05 ) ) );
+			}
+			p setplayerangles( look );
+			pup = c.puppets[ slot ];
+			if ( isdefined( pup ) )
+			{
+				if ( isdefined( last ) && k > 5 )
+					steps[ steps.size ] = distance( ( pup.origin[ 0 ], pup.origin[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
+				last = pup.origin;
+			}
+			if ( ( t[ 0 ] == "walk" && k >= 30 && k < 42 ) || ( t[ 0 ] == "run" && k >= 8 && k < 20 ) )
+				openfile( "coop", "shot", "seq_" + t[ 0 ] + "_" + ( 100 + k ) );
+			wait 0.05;
+		}
+		step_stats( "follow_" + t[ 0 ], steps, c.reanchors - r0 );
+	}
+	maps\_coop::log( "botfollow done" );
 }

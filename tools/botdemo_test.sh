@@ -3,7 +3,7 @@
 # "botdemo" test command (bot plays every animation state in front of the camera), screenshot each phase.
 #   bash tools/botdemo_test.sh <outdir> [map] [start]
 set -u
-OUT=${1:?outdir}; MAP=${2:-bog_a}; START=${3:-bog}
+OUT=${1:?outdir}; MAP=${2:-bog_a}; START=${3:-bog}; TEST=${4:-botdemo}
 HERE=$(cd "$(dirname "$0")" && pwd)
 GAME="$HERE/../../Call of Duty 4-Modern Warfare"
 LOG="$GAME/coop_native_7.log"
@@ -25,9 +25,9 @@ for k in 1 2 3; do sleep 2; ps "$HERE/postkey.ps1" "$PID" >/dev/null; grep -q 's
 wait_for 'spawned puppet' 240 || exit 1
 echo "gameplay $(( $(date +%s) - T1 ))s after load"
 sleep 2
-ps "$HERE/bg.ps1" cmd 7 "set coop_test_cmd botdemo" >/dev/null
+ps "$HERE/bg.ps1" cmd 7 "set coop_test_cmd $TEST" >/dev/null
 rm -f "$GAME"/coop_shot_7_*.bmp
-wait_for 'botdemo done' 120
+wait_for "$TEST done" 120
 ps "$HERE/bg.ps1" kill "$PID"
 grep -i 'error' "$GAME/Mods/cooptest/console.log" | grep -iv 'channel\|errormessage\|asErrors\|errorOnMissing\|No languages' | sort -u | head
 python "$HERE/contact_sheet.py" "$GAME" 7 "$OUT"

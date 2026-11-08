@@ -98,3 +98,13 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
   screenshot at an exact moment: openfile("coop","shot",name). `bash tools/botdemo_test.sh <out> killhouse start`
   runs the whole bot animation check (16 phases x 2 frames + contact sheet) in ~66 s, on port 28971 and
   fs_game mods/cooptest so it never touches a running player game.
+
+## Smooth puppet movement (2026-11-09)
+- Gait is sent, not guessed: pose flags bits 16-20 = 1 + gait*4 + dir (still/walk/run/sprint x f/b/l/r),
+  from the player's velocity or the bot's own state. Guessing from interpolated positions flickered anims.
+- animscripted pitfalls (all measured): re-issuing it does not move the entity to the new anchor; issuing
+  it while one plays stacks root motions (body races ahead); stopanimscripted() takes effect next frame
+  and fires "end". Now: stop, wait one frame, start (guarded), and every frame pin the entity origin to
+  the network pose minus one frame of root motion. Body stays within 4.5 (walk) / 9 (run) units, no drift.
+- `bash tools/botdemo_test.sh <out> killhouse start botfollow`: host glides backwards facing the bot at
+  walk/run/sprint, bot chases with its real brain, per-frame screenshots + stats, ~25 s.
