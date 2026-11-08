@@ -159,6 +159,10 @@ bot_think( slot, idx )
 	pa = p getplayerangles();
 	b.yaw = pa[ 1 ];
 	b.pitch = 0;
+	b.speed = 0;
+	b.following = false;
+	b.aim_p = 0;
+	b.aim_y = 0;
 	spacing = 100 + idx * 60;
 	tick = 0;
 
@@ -207,12 +211,16 @@ bot_think( slot, idx )
 		}
 
 		goal = undefined;
-		speed = 190;
+		want = 0;
 		if ( c.down )
 		{
 			// host is down: go straight to them and revive
+			b.following = false;
 			if ( d > 44 )
+			{
 				goal = p.origin;
+				want = 250;
+			}
 			else
 			{
 				if ( !isdefined( b.revive_start ) )
@@ -227,7 +235,12 @@ bot_think( slot, idx )
 		else
 		{
 			b.revive_start = undefined;
-			if ( d > spacing )
+			// hysteresis: start walking well outside the spacing, stop inside it (no stop-go flicker)
+			if ( d > spacing + 60 )
+				b.following = true;
+			else if ( d < spacing )
+				b.following = false;
+			if ( b.following )
 			{
 				while ( b.trail.size > 0 && distance( b.trail[ 0 ], b.origin ) < 24 )
 					trail_pop( b );
@@ -238,30 +251,58 @@ bot_think( slot, idx )
 					goal = b.trail[ 0 ];
 				else
 					goal = p.origin;
-				if ( d > 450 )
-					speed = 280;
+				// pace like a person: walk to close a small gap, run for a bigger one, sprint to catch up,
+				// and never slower than the host is moving (speeds match the puppet's walk/run/sprint anims)
+				gap = d - spacing;
+				want = 100;
+				if ( gap > 140 )
+					want = 185;
+				if ( gap > 450 )
+					want = 250;
+				hv = length( p getvelocity() );
+				if ( hv > want )
+					want = hv;
+				if ( want > 260 )
+					want = 260;
 			}
 		}
 
+		// accelerate and brake smoothly instead of jumping between standing and running
+		if ( b.speed < want )
+			b.speed = min( want, b.speed + 30 );
+		else
+			b.speed = max( want, b.speed - 45 );
+
 		moving = false;
-		if ( isdefined( goal ) )
+		if ( b.speed > 5 )
 		{
-			dir = goal - b.origin;
-			len = length( dir );
-			if ( len > 1 )
+			if ( isdefined( goal ) )
 			{
-				step = speed * 0.05;
-				if ( step > len )
+				dir = goal - b.origin;
+				len = length( dir );
+				if ( len > 1 )
+					b.move_dir = vectorscale( dir, 1 / len );
+				else if ( !isdefined( b.move_dir ) )
+					b.move_dir = ( 0, 0, 0 );
+				step = b.speed * 0.05;
+				if ( len > 0 && step > len )
 					step = len;
-				b.origin = b.origin + vectorscale( dir, step / len );
+			}
+			else
+				step = b.speed * 0.05; // braking: coast a few units along the last heading
+			if ( isdefined( b.move_dir ) )
+			{
+				b.origin = b.origin + vectorscale( b.move_dir, step );
 				moving = true;
-				if ( len > 8 )
+				if ( abs( b.move_dir[ 0 ] ) + abs( b.move_dir[ 1 ] ) > 0.01 )
 				{
-					ma = vectortoangles( ( dir[ 0 ], dir[ 1 ], 0 ) );
+					ma = vectortoangles( ( b.move_dir[ 0 ], b.move_dir[ 1 ], 0 ) );
 					b.move_yaw = ma[ 1 ];
 				}
 			}
 		}
+		else
+			b.speed = 0;
 
 		// stance: match the host; stand to run
 		st = p getstance();
@@ -292,8 +333,9 @@ bot_think( slot, idx )
 		if ( isdefined( b.target ) && !c.down )
 		{
 			ang = vectortoangles( b.target geteye() - ( 0, 0, 8 ) - bot_eye( b ) );
-			b.pitch = ang[ 0 ] + randomfloatrange( -1.2, 1.2 );
-			b.yaw = ang[ 1 ] + randomfloatrange( -1.5, 1.5 );
+			// aim error is picked once per burst: per-frame jitter would twitch the body every frame
+			b.pitch = ang[ 0 ] + b.aim_p;
+			b.yaw = turn_toward( b.yaw, ang[ 1 ] + b.aim_y, 30 );
 			// short reaction time, then 3-round bursts
 			if ( now - b.seen_since > 450 && now >= b.next_shot && b.weapon != "" )
 			{
@@ -305,6 +347,8 @@ bot_think( slot, idx )
 				if ( b.burst >= 3 )
 				{
 					b.burst = 0;
+					b.aim_p = randomfloatrange( -1.2, 1.2 );
+					b.aim_y = randomfloatrange( -1.5, 1.5 );
 					b.next_shot = now + randomintrange( 450, 900 );
 				}
 				else
@@ -315,11 +359,13 @@ bot_think( slot, idx )
 		{
 			b.pitch = 0;
 			if ( moving && isdefined( b.move_yaw ) )
-				b.yaw = b.move_yaw;
+				b.yaw = turn_toward( b.yaw, b.move_yaw, 20 );
 			else if ( d > 60 )
 			{
 				fa = vectortoangles( p.origin - b.origin );
-				b.yaw = fa[ 1 ];
+				// idle: only turn when the host has moved well off to the side
+				if ( abs( maps\_coop_puppet::angle180( fa[ 1 ] - b.yaw ) ) > 35 )
+					b.yaw = turn_toward( b.yaw, fa[ 1 ], 12 );
 			}
 		}
 
@@ -350,4 +396,15 @@ debug_axis( slot, b )
 			seen++;
 	}
 	maps\_coop::log( "bot " + slot + " at " + b.origin + " axis " + axis.size + " nearest " + int( near ) + " visible " + seen + " shots " + b.shots );
+}
+
+// turn from a toward b by at most maxStep degrees (smooth body turns; the puppet re-anchors on every turn > 2)
+turn_toward( a, b, maxStep )
+{
+	d = maps\_coop_puppet::angle180( b - a );
+	if ( d > maxStep )
+		d = maxStep;
+	else if ( d < 0 - maxStep )
+		d = 0 - maxStep;
+	return maps\_coop_puppet::angle180( a + d );
 }
