@@ -599,7 +599,14 @@ set_puppet_anim( name )
 	self.coop_anim_frame = gettime();
 	level.coop.reanchors++;
 	self.origin = pos; // keeps the name tag, traces and lookat on the body
+	if ( isdefined( self.coop_anim_live ) && self.coop_anim_live != name )
+	{
+		self.coop_switching = true; // the stop fires "end": the restart handler must ignore it
+		self stopanimscripted();
+	}
 	self animscripted( "coop_anim", anchor, ( 0, yaw, 0 ), pa );
+	self.coop_anim_live = name;
+	self.coop_switching = undefined;
 	if ( t > 0 && t < 1 )
 		self setanimtime( pa, t );
 	if ( !isdefined( self.coop_anim_loop ) )
@@ -622,6 +629,8 @@ puppet_anim_restart()
 	for ( ;; )
 	{
 		self waittillmatch( "coop_anim", "end" );
+		if ( isdefined( self.coop_switching ) )
+			continue;
 		// restart the cycle in this same frame, on the current pose: waiting for the next update showed
 		// the body one frame at the end-of-cycle spot (a full stride away)
 		if ( isdefined( self.coop_pos ) && isdefined( self.coop_anim ) && !self.coop_hidden )

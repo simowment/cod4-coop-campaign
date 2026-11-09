@@ -156,7 +156,8 @@ bot_think( slot, idx )
 	// preferred: a real campaign soldier, driven by the game's own AI (pathing, cover, anims, combat)
 	if ( !isdefined( c.bot_ai ) )
 		c.bot_ai = [];
-	for ( ; getdvar( "coop_bot_puppet" ) != "1"; ) // tests: force the scripted puppet bot
+	// killhouse scripts hold every extra soldier still: use the scripted bot there straight away
+	for ( ; getdvar( "coop_bot_puppet" ) != "1" && level.script != "killhouse"; ) // tests can force the scripted bot
 	{
 		guy = spawn_real_bot( slot, idx );
 		if ( !isdefined( guy ) )
@@ -167,6 +168,8 @@ bot_think( slot, idx )
 		wait 2;
 	}
 	// fallback (no friendly spawner in this level): the scripted puppet bot below
+	for ( i = 0; i < 100 && !( p isonground() ); i++ )
+		wait 0.05; // the host may still be dropping into the level
 	b = spawnstruct();
 	b.origin = spot_behind_host( idx );
 	b.trail = [];
@@ -221,7 +224,8 @@ bot_think( slot, idx )
 		// in a ride, rig or scene: the host is not walking, so the bot rides along out of sight
 		if ( isdefined( c.hidden ) || maps\_coop::player_linked() || !isalive( p ) )
 		{
-			b.origin = p.origin;
+			// riding / on a ladder / scripted rig: hide where it stands (warping onto the host showed as a
+			// teleport the moment the ride or climb ended); it catches up or regroups afterwards
 			b.trail = [];
 			bot_pose( slot, b, 32, 0, b.yaw );
 			wait 0.05;
@@ -763,7 +767,7 @@ pick_spawner()
 spawn_real_bot( slot, idx )
 {
 	c = level.coop;
-	wait 1; // let the level finish spawning its own squad first
+	wait 0.25; // let the level finish spawning its own squad first
 	sp = pick_spawner();
 	if ( !isdefined( sp ) )
 	{
@@ -824,16 +828,17 @@ bot_ai_think( slot, idx, guy )
 			return;
 		}
 		// frozen by the level (it never moves although the host is far): hand over to the scripted bot
-		if ( distance( guy.origin, still_at ) > 16 || distance( guy.origin, p.origin ) < 400 || isdefined( c.hidden ) || maps\_coop::player_linked() )
+		if ( distance( guy.origin, still_at ) > 16 || distance( guy.origin, p.origin ) < guy.goalradius + 64 || isdefined( c.hidden ) || maps\_coop::player_linked() )
 		{
 			still_at = guy.origin;
 			still_since = gettime();
 		}
-		else if ( gettime() - still_since > 5000 )
+		else if ( gettime() - still_since > 2500 )
 		{
 			maps\_coop::log( "bot " + slot + ": real AI does not move in " + level.script + ", using the scripted bot" );
 			c.bot_ai_frozen = true;
 			c.bot_ai[ slot ] = undefined;
+			c.bot_place = guy.origin; // the scripted bot takes over where the soldier stood: no visible jump
 			guy stop_magic_bullet_shield();
 			guy delete();
 			return;
