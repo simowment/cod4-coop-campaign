@@ -595,9 +595,22 @@ set_puppet_anim( name )
 	pa = level.coop.puppet_anims[ name ];
 	if ( self.coop_anim != name )
 	{
+		blend = 0.2;
 		if ( self.coop_anim != "" )
-			self clearanim( level.coop.puppet_anims[ self.coop_anim ], 0.2 );
-		self setanimrestart( pa, 1, 0.2, rate );
+		{
+			old = level.coop.puppet_anims[ self.coop_anim ];
+			if ( sp <= 1 && level.coop.anim_speed[ self.coop_anim ] > 1 )
+			{
+				// stopping: freeze the stride where it is (the body no longer moves, so walking legs
+				// during the blend looked like a moonwalk) and settle into the idle a bit more slowly
+				self setanim( old, 1, 0, 0 );
+				blend = 0.3;
+			}
+		}
+		// like the AI's own animscripts (run.gsc): one call fades the new anim in and everything else under
+		// %body out. Fading a single leaf did not blend: the engine renormalises weights inside each parent
+		// node, so the old anim stayed at full strength until its weight hit zero and then snapped off.
+		self setanimknoball( pa, %body, 1, blend, rate );
 		self.coop_anim = name;
 		self.coop_rate = rate;
 		return;
