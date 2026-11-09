@@ -156,7 +156,7 @@ bot_think( slot, idx )
 	// preferred: a real campaign soldier, driven by the game's own AI (pathing, cover, anims, combat)
 	if ( !isdefined( c.bot_ai ) )
 		c.bot_ai = [];
-	for ( ;; )
+	for ( ; getdvar( "coop_bot_puppet" ) != "1"; ) // tests: force the scripted puppet bot
 	{
 		guy = spawn_real_bot( slot, idx );
 		if ( !isdefined( guy ) )
@@ -490,6 +490,9 @@ bot_demo( slot, b )
 	face = a[ 1 ] + 180; // looking at the camera
 	// name, stance, flags, speed, mode (still / across = sideways facing travel / strafe = sideways facing camera / away = backing away facing camera)
 	ph = [];
+	ph[ ph.size ] = "turn_idle|0|0|0|turn";
+	ph[ ph.size ] = "walk_circle|0|0|walk_f|circle";
+	ph[ ph.size ] = "run_circle|0|0|run_f|circle";
 	ph[ ph.size ] = "stand_idle|0|0|0|still";
 	ph[ ph.size ] = "stand_aim|0|4|0|still";
 	ph[ ph.size ] = "stand_fire|0|12|0|still";
@@ -546,10 +549,27 @@ bot_demo( slot, b )
 					off = 0;
 				pos = center + vectorscale( fwd, off );
 			}
+			else if ( mode == "turn" )
+			{
+				pos = center;
+				yaw = face + k * 6; // 120 deg/s, on the spot
+			}
+			else if ( mode == "circle" )
+			{
+				// circle of radius 60 around the centre, facing the way it walks
+				ang = k * speed * 0.05 / 60 * 57.3;
+				pos = center + ( cos( ang ) * 60, sin( ang ) * 60, 0 );
+				yaw = ang + 90;
+			}
 			else
 				pos = center;
+			prev = b.origin;
 			b.origin = ground_at( pos );
 			f = stance + flags;
+			if ( k > 0 )
+				f += bot_gait( vectorscale( b.origin - prev, 20 ), yaw );
+			else
+				f += 65536;
 			if ( ( flags & 8 ) != 0 && k % 3 == 0 )
 				b.shots++;
 			f += ( b.shots % 256 ) * 256;
@@ -559,12 +579,13 @@ bot_demo( slot, b )
 			bot_pose( slot, b, f, 0, fire_yaw );
 			if ( isdefined( pup ) )
 			{
+				body = pup gettagorigin( "j_mainroot" ); // where the skeleton is actually drawn
 				if ( isdefined( last ) && k > 10 )
-					steps[ steps.size ] = distance( ( pup.origin[ 0 ], pup.origin[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
-				last = pup.origin;
+					steps[ steps.size ] = distance( ( body[ 0 ], body[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
+				last = body;
 			}
-			if ( k == 25 || k == 45 )
-				openfile( "coop", "shot", t[ 0 ] + "_" + k ); // test mode only: the proxy saves this frame
+			if ( k == 25 || k == 45 || ( ( mode == "turn" || mode == "circle" ) && k >= 20 && k < 32 ) )
+				openfile( "coop", "shot", t[ 0 ] + "_" + ( 100 + k ) ); // test mode only: the proxy saves this frame
 			wait 0.05;
 		}
 		step_stats( t[ 0 ], steps, level.coop.reanchors - r0 );
@@ -685,9 +706,12 @@ follow_test( slot )
 				pup = c.bot_ai[ slot ];
 			if ( isdefined( pup ) )
 			{
+				body = pup gettagorigin( "j_mainroot" ); // where the skeleton is actually drawn
+				if ( k % 2 == 0 && isdefined( pup.coop_pos ) )
+					maps\_coop::log( "drawn " + t[ 0 ] + " k " + k + " gap " + int( distance( ( body[ 0 ], body[ 1 ], 0 ), ( pup.coop_pos[ 0 ], pup.coop_pos[ 1 ], 0 ) ) ) + " anim " + pup.coop_anim );
 				if ( isdefined( last ) && k > 5 )
-					steps[ steps.size ] = distance( ( pup.origin[ 0 ], pup.origin[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
-				last = pup.origin;
+					steps[ steps.size ] = distance( ( body[ 0 ], body[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
+				last = body;
 			}
 			if ( ( t[ 0 ] == "walk" && k >= 30 && k < 42 ) || ( t[ 0 ] == "run" && k >= 8 && k < 20 ) )
 				openfile( "coop", "shot", "seq_" + t[ 0 ] + "_" + ( 100 + k ) );

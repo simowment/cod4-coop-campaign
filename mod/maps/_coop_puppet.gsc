@@ -222,6 +222,7 @@ update_puppet( slot )
 	self.coop_speed = self.coop_speed * 0.6 + speed * 0.4;
 	self.coop_lastpos = pos;
 	self.coop_pos = pos;
+	self.coop_delta = delta;
 	self.coop_yaw = yaw;
 
 	self set_puppet_anim( choose_anim( flags, delta, yaw ) );
@@ -341,76 +342,7 @@ choose_anim( flags, delta, yaw )
 // drawn at its anchor, not at the entity origin. So the anim is re-anchored on the network pose whenever
 // that moves or turns, continuing from the same point in the cycle (getanimtime/setanimtime).
 // A small loop restarts it when a non-looping anim reaches its end.
-set_puppet_anim( name )
-{
-	if ( isdefined( self.coop_starting ) )
-		return; // a new anim starts next frame; decide nothing until it is playing
-	changed = self.coop_anim != name;
-	pa = level.coop.puppet_anims[ name ];
-	if ( !isdefined( self.coop_pos ) )
-		return;
-	// Like campaign AI, a moving anim's own root motion carries the body smoothly at render rate: each
-	// stride cycle plays out from one anchor, and the next cycle starts (at frame 0, exactly on the network
-	// pose) when it ends. Re-anchoring mid-cycle made the body step at 20 Hz or pop. Mid-cycle restarts
-	// happen only for a sharp turn or a large drift. Standing anims have no root motion, so they can follow
-	// the facing finely and resume at the same point in the cycle.
-	moving = level.coop.anim_speed[ name ] > 1;
-	drift = 999;
-	if ( isdefined( self.coop_anchor ) )
-		drift = distance( ( self.origin[ 0 ], self.origin[ 1 ], 0 ), ( self.coop_pos[ 0 ], self.coop_pos[ 1 ], 0 ) );
-	dz = abs( self.origin[ 2 ] - self.coop_pos[ 2 ] );
-	turn = 0;
-	if ( isdefined( self.coop_anchor_yaw ) )
-		turn = abs( angle180( self.coop_anchor_yaw - self.coop_yaw ) );
-	// the body is placed on the network pose every frame (below), so the anim only has to be (re)started
-	// when it changes; a big turn re-anchors so the root motion faces the new way
-	reanchor = !isdefined( self.coop_anchor ) || ( moving && turn > 45 );
-	if ( !changed && !reanchor )
-	{
-		self place_body();
-		return;
-	}
-	if ( isdefined( self.coop_anim_frame ) && self.coop_anim_frame == gettime() )
-		return; // animscripted may only be issued once per entity per frame; a switch is retried next frame
-	self.coop_anim = name; // only once it is really playing (recording it early left the old anim running)
-	t = 0;
-	if ( !changed && !moving && isdefined( self.coop_anchor ) )
-		t = self getanimtime( pa );
-	self.coop_anchor = self.coop_pos;
-	self.coop_anchor_yaw = self.coop_yaw;
-	level.coop.reanchors++;
-	self.coop_anim_frame = gettime();
-	// like the stock drones: stop the old scripted anim first, or its root motion keeps driving the body
-	self thread start_anim( pa, t );
-	if ( !isdefined( self.coop_anim_loop ) )
-	{
-		self.coop_anim_loop = true;
-		self thread puppet_anim_restart();
-	}
-}
 
-puppet_anim_restart()
-{
-	self endon( "death" );
-	for ( ;; )
-	{
-		self waittillmatch( "coop_anim", "end" );
-		if ( isdefined( self.coop_starting ) )
-			continue; // stopanimscripted() also fires "end": a switch is already starting the next anim
-		// start the next cycle in this same frame, on the current network pose: a seamless loop
-		if ( isdefined( self.coop_pos ) && isdefined( self.coop_anim ) && !self.coop_hidden && ( !isdefined( self.coop_anim_frame ) || self.coop_anim_frame != gettime() ) )
-		{
-			self.coop_anchor = self.coop_pos;
-			self.coop_anchor_yaw = self.coop_yaw;
-			self.coop_anim_frame = gettime();
-			self.origin = self.coop_pos;
-			self.angles = ( 0, self.coop_yaw, 0 );
-			self animscripted( "coop_anim", self.coop_pos, ( 0, self.coop_yaw, 0 ), level.coop.puppet_anims[ self.coop_anim ] );
-		}
-		else
-			self.coop_anchor = undefined; // forces a fresh start on the next update
-	}
-}
 
 angle180( a )
 {
@@ -613,40 +545,70 @@ target_puppet_for( p, t )
 // Issuing animscripted while one is still playing stacks them (both root motions drive the body, so it
 // races ahead), and stopanimscripted only takes effect on the next frame. So: stop, wait a frame, then
 // teleport onto the network pose and start the new anim.
-start_anim( pa, t )
-{
-	self endon( "death" );
-	if ( isdefined( self.coop_anim_live ) )
-	{
-		self.coop_starting = true;
-		self stopanimscripted();
-		wait 0.05;
-		self.coop_starting = undefined;
-	}
-	self.origin = self.coop_pos;
-	self.angles = ( 0, self.coop_yaw, 0 );
-	self.coop_anchor = self.coop_pos;
-	self.coop_anchor_yaw = self.coop_yaw;
-	self.coop_anim_frame = gettime();
-	self animscripted( "coop_anim", self.coop_pos, ( 0, self.coop_yaw, 0 ), pa );
-	self.coop_anim_live = true;
-	if ( t > 0 && t < 1 )
-		self setanimtime( pa, t );
-}
 
 // Root motion is applied per frame as a step from wherever the body is, so pinning the entity to the
 // network pose each frame keeps it exactly on the player while the anim plays continuously (the engine
 // interpolates entity origins between frames, so this is smooth). Moving anims lead by one frame of root
 // motion, which is subtracted.
-place_body()
+
+// A fake-AI model is drawn at the animscripted anchor plus the anim's own root motion; the entity origin
+// does not move it (moveto has no effect on the body). So the anchor *is* the position: it is placed at
+// the network pose minus the travel the cycle has already done, and the anim resumes at the same time.
+// Between re-anchors the root motion moves the body smoothly; a re-anchor only happens when the predicted
+// body is more than a few units off the network pose, the facing changed, or the gait changed.
+set_puppet_anim( name )
 {
-	if ( isdefined( self.coop_starting ) || !isdefined( self.coop_pos ) )
+	if ( !isdefined( self.coop_pos ) )
 		return;
-	lead = ( 0, 0, 0 );
-	if ( isdefined( self.coop_anim ) && level.coop.anim_speed[ self.coop_anim ] > 1 )
+	pos = self.coop_pos;
+	yaw = self.coop_yaw;
+	pa = level.coop.puppet_anims[ name ];
+	changed = self.coop_anim != name || isdefined( self.coop_anim_ended ) || !isdefined( self.coop_anchor );
+	t = 0;
+	if ( !changed )
 	{
-		f = anglestoforward( ( 0, self.coop_anchor_yaw, 0 ) );
-		lead = vectorscale( f, level.coop.anim_speed[ self.coop_anim ] * 0.05 );
+		t = self getanimtime( pa );
+		predicted = self.coop_anchor + rotate_yaw( getmovedelta( pa, 0, t ), self.coop_anchor_yaw );
+		off = distance( ( predicted[ 0 ], predicted[ 1 ], 0 ), ( pos[ 0 ], pos[ 1 ], 0 ) );
+		turn = abs( angle180( self.coop_anchor_yaw - yaw ) );
+		if ( off < 6 && turn < 4 && abs( predicted[ 2 ] - pos[ 2 ] ) < 6 )
+			return;
 	}
-	self.origin = self.coop_pos - lead;
+	if ( isdefined( self.coop_anim_frame ) && self.coop_anim_frame == gettime() )
+		return;
+	anchor = pos;
+	if ( t > 0 && t < 1 )
+		anchor = pos - rotate_yaw( getmovedelta( pa, 0, t ), yaw );
+	self.coop_anim = name;
+	self.coop_anim_ended = undefined;
+	self.coop_anchor = anchor;
+	self.coop_anchor_yaw = yaw;
+	self.coop_anim_frame = gettime();
+	level.coop.reanchors++;
+	self.origin = pos; // keeps the name tag, traces and lookat on the body
+	self animscripted( "coop_anim", anchor, ( 0, yaw, 0 ), pa );
+	if ( t > 0 && t < 1 )
+		self setanimtime( pa, t );
+	if ( !isdefined( self.coop_anim_loop ) )
+	{
+		self.coop_anim_loop = true;
+		self thread puppet_anim_restart();
+	}
+}
+
+rotate_yaw( v, yaw )
+{
+	c = cos( yaw );
+	s = sin( yaw );
+	return ( v[ 0 ] * c - v[ 1 ] * s, v[ 0 ] * s + v[ 1 ] * c, v[ 2 ] );
+}
+
+puppet_anim_restart()
+{
+	self endon( "death" );
+	for ( ;; )
+	{
+		self waittillmatch( "coop_anim", "end" );
+		self.coop_anim_ended = true; // restarted on the next update
+	}
 }

@@ -118,3 +118,14 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
 - Host hides the bot slot's puppet; remote friends get the AI's pose (gait from its velocity).
 - Killhouse holds its AI still: after 5 s without moving the AI is removed and the scripted bot takes over.
 - Verified: bog_a follow (walk/run/sprint, crouches by itself), killhouse fallback, no script errors.
+
+## Puppet movement, final model (2026-11-09) — supersedes the two sections above
+- Ground truth: a fake-AI model is DRAWN at the animscripted anchor + the anim's root motion. The entity
+  origin (and moveto/rotateto, .angles) does not move the body. Measure with gettagorigin("j_mainroot"),
+  never with .origin (that misled several iterations).
+- Method: anchor = network pose - rotate(getmovedelta(anim, 0, t), yaw), animscripted at the anchor,
+  setanimtime(t). Re-anchor only when predicted body (anchor + delta(t)) is > 6 units off, facing changed
+  > 4 deg, or gait changed. Turning = re-anchor with the new yaw (no stop, no wait).
+- Verified on the drawn skeleton: follow test body within 0-8 units at walk/run/stop; turning on the spot
+  max 2.4/frame; running in a circle 8.5/frame (anim speed 9) max 17; frame strips show continuous stride.
+- Tests: `bash tools/botdemo_test.sh <out> killhouse start [botdemo|botfollow]` (forces the puppet bot).
