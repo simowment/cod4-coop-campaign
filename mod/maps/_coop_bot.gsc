@@ -308,6 +308,8 @@ bot_think( slot, idx )
 		// reach the gait speed within ~0.15 s: in-between speeds would not match any anim's own motion
 		if ( b.speed < want )
 			b.speed = min( want, b.speed + 80 );
+		else if ( want == 0 )
+			b.speed = 0; // stop on the spot: braking through walk speed flashed a walk pose between run and idle
 		else
 			b.speed = max( want, b.speed - 90 );
 
@@ -707,13 +709,13 @@ follow_test( slot )
 			if ( isdefined( pup ) )
 			{
 				body = pup gettagorigin( "j_mainroot" ); // where the skeleton is actually drawn
-				if ( k % 2 == 0 && isdefined( pup.coop_pos ) )
+				if ( isdefined( pup.coop_pos ) )
 					maps\_coop::log( "drawn " + t[ 0 ] + " k " + k + " gap " + int( distance( ( body[ 0 ], body[ 1 ], 0 ), ( pup.coop_pos[ 0 ], pup.coop_pos[ 1 ], 0 ) ) ) + " anim " + pup.coop_anim );
 				if ( isdefined( last ) && k > 5 )
 					steps[ steps.size ] = distance( ( body[ 0 ], body[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
 				last = body;
 			}
-			if ( ( t[ 0 ] == "walk" && k >= 30 && k < 42 ) || ( t[ 0 ] == "run" && k >= 8 && k < 20 ) )
+			if ( ( t[ 0 ] == "sprint" && k >= 10 ) || ( t[ 0 ] == "stop" && k < 12 ) )
 				openfile( "coop", "shot", "seq_" + t[ 0 ] + "_" + ( 100 + k ) );
 			wait 0.05;
 		}

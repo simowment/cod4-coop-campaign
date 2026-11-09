@@ -225,7 +225,20 @@ update_puppet( slot )
 	self.coop_delta = delta;
 	self.coop_yaw = yaw;
 
-	self set_puppet_anim( choose_anim( flags, delta, yaw ) );
+	// debounce: a new anim must be asked for on 2 updates in a row (a one-frame gait flicker would snap
+	// the pose twice); the first anim and downed/prone changes apply at once
+	want = choose_anim( flags, delta, yaw );
+	if ( isdefined( self.coop_anim ) && want != self.coop_anim && want != "downed" && self.coop_anim != "downed" )
+	{
+		if ( !isdefined( self.coop_want ) || self.coop_want != want )
+		{
+			self.coop_want = want;
+			want = self.coop_anim;
+		}
+	}
+	else
+		self.coop_want = undefined;
+	self set_puppet_anim( want );
 	self replay_shots( slot, flags, pos, pitch, yaw );
 }
 
@@ -609,6 +622,16 @@ puppet_anim_restart()
 	for ( ;; )
 	{
 		self waittillmatch( "coop_anim", "end" );
-		self.coop_anim_ended = true; // restarted on the next update
+		// restart the cycle in this same frame, on the current pose: waiting for the next update showed
+		// the body one frame at the end-of-cycle spot (a full stride away)
+		if ( isdefined( self.coop_pos ) && isdefined( self.coop_anim ) && !self.coop_hidden )
+		{
+			self.coop_anchor = self.coop_pos;
+			self.coop_anchor_yaw = self.coop_yaw;
+			self.coop_anim_frame = gettime();
+			self animscripted( "coop_anim", self.coop_pos, ( 0, self.coop_yaw, 0 ), level.coop.puppet_anims[ self.coop_anim ] );
+		}
+		else
+			self.coop_anim_ended = true; // restarted on the next update
 	}
 }
