@@ -92,6 +92,7 @@ postinit()
 	thread watch_death();
 	maps\_coop_player::init();
 	maps\_coop_puppet::init();
+	maps\_coop_avatar::init();
 	maps\_coop_bot::init();
 	log( "postinit: " + c.trig_count + " triggers, " + c.spawner_count + " spawners" );
 }

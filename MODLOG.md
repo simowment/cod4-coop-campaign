@@ -129,3 +129,14 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
 - Verified on the drawn skeleton: follow test body within 0-8 units at walk/run/stop; turning on the spot
   max 2.4/frame; running in a circle 8.5/frame (anim speed 9) max 17; frame strips show continuous stride.
 - Tests: `bash tools/botdemo_test.sh <out> killhouse start [botdemo|botfollow]` (forces the puppet bot).
+
+## Blended puppet (2026-11-09) — replaces every animscripted approach above
+- Plain script_model (no makefakeai) + useanimtree(generic_human) + setanim/clearanim, exactly how the
+  stock _vehicle.gsc animates script models: anims play in place, gait change = 0.2 s crossfade
+  (clearanim old 0.2, setanimrestart new 1 0.2 rate), locomotion rate = ground speed / anim speed
+  (0.6-1.6), model glides with moveto/rotateto(pos, 0.1). Idle anims re-started near their end.
+- Nothing can pop by construction (no anchors, no animscripted restarts). Measured on j_mainroot in
+  killhouse: walk max 7.5/frame, run 16.7, sprint 7, turning 5, circles 13; frames show real strides and a
+  smooth crossfade into idle.
+- AI avatars (_coop_avatar.gsc, real friendly AI steered to the pose) need path nodes; killhouse has none
+  near the start (357 nodes, 0 within 800 units), so they are off by default (+set coop_avatar 1 to try).

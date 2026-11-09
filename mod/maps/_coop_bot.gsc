@@ -710,11 +710,16 @@ follow_test( slot )
 			pup = c.puppets[ slot ];
 			if ( isdefined( c.bot_ai ) && isdefined( c.bot_ai[ slot ] ) )
 				pup = c.bot_ai[ slot ];
+			if ( maps\_coop_avatar::active( slot ) )
+				pup = c.avatars[ slot ];
 			if ( isdefined( pup ) )
 			{
 				body = pup gettagorigin( "j_mainroot" ); // where the skeleton is actually drawn
-				if ( isdefined( pup.coop_pos ) )
-					maps\_coop::log( "drawn " + t[ 0 ] + " k " + k + " gap " + int( distance( ( body[ 0 ], body[ 1 ], 0 ), ( pup.coop_pos[ 0 ], pup.coop_pos[ 1 ], 0 ) ) ) + " anim " + pup.coop_anim );
+				net = ( fgetarg( slot, 0 ), fgetarg( slot, 1 ), 0 );
+				an = "ai";
+				if ( isdefined( pup.coop_anim ) )
+					an = pup.coop_anim;
+				maps\_coop::log( "drawn " + t[ 0 ] + " k " + k + " gap " + int( distance( ( body[ 0 ], body[ 1 ], 0 ), net ) ) + " anim " + an );
 				if ( isdefined( last ) && k > 5 )
 					steps[ steps.size ] = distance( ( body[ 0 ], body[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
 				last = body;
@@ -779,28 +784,14 @@ spawn_real_bot( slot, idx )
 	for ( i = 0; i < 100 && !( p isonground() ); i++ )
 		wait 0.05;
 	pa = p getplayerangles();
-	pos = node_near( spot_behind_host( idx ), p.origin );
 	org = sp.origin;
-	ang = sp.angles;
-	cnt = sp.count;
-	sp.origin = pos;
-	sp.angles = ( 0, pa[ 1 ], 0 );
-	sp.count = 1;
-	guy = sp stalingradspawn();
-	sp.origin = org;
-	sp.angles = ang;
-	sp.count = cnt;
-	if ( spawn_failed( guy ) )
+	guy = spawn_ally_ai( node_near( spot_behind_host( idx ), p.origin ), pa[ 1 ], c.names[ slot ] );
+	if ( !isdefined( guy ) )
 	{
 		maps\_coop::log( "bot " + slot + ": spawn failed, using the scripted bot" );
 		return undefined;
 	}
-	guy.team = "allies";
-	guy.name = c.names[ slot ];
 	guy.coop_bot_slot = slot;
-	guy thread magic_bullet_shield();
-	guy thread disable_ai_color();
-	guy.fixednode = false; // free to path anywhere, not just to cover nodes
 	guy.goalradius = 160 + idx * 48;
 	guy setgoalpos( p.origin ); // never setgoalentity( player ): fatal unless the player is on a friendly chain
 	c.bot_ai[ slot ] = guy;
@@ -929,7 +920,44 @@ node_near( want, host )
 			bestd = d;
 		}
 	}
+	if ( getdvar( "coop_debug" ) == "1" )
+	{
+		near = 0;
+		for ( i = 0; i < nodes.size; i++ )
+			if ( distancesquared( nodes[ i ].origin, host ) < 800 * 800 )
+				near++;
+		maps\_coop::log( "nodes: " + nodes.size + " in level, " + near + " within 800 of " + host + ", nearest to spot " + int( sqrt( bestd ) ) );
+	}
 	if ( !isdefined( best ) || bestd > 600 * 600 )
 		return want;
 	return best;
+}
+
+// A real friendly soldier at pos, borrowed from one of the level's spawners the way the stock
+// makerealai() does it (move the spawner, force-spawn, put it back). Invulnerable, no colour orders,
+// no friendly-fire penalty, free to path. Used for the bot and for remote players' avatars.
+spawn_ally_ai( pos, yaw, name )
+{
+	sp = pick_spawner();
+	if ( !isdefined( sp ) )
+		return undefined;
+	org = sp.origin;
+	ang = sp.angles;
+	cnt = sp.count;
+	sp.origin = pos;
+	sp.angles = ( 0, yaw, 0 );
+	sp.count = 1;
+	guy = sp stalingradspawn();
+	sp.origin = org;
+	sp.angles = ang;
+	sp.count = cnt;
+	if ( spawn_failed( guy ) )
+		return undefined;
+	guy.team = "allies";
+	guy.name = name;
+	guy.no_friendly_fire_penalty = true;
+	guy thread magic_bullet_shield();
+	guy thread disable_ai_color();
+	guy.fixednode = false; // free to path anywhere, not just to cover nodes
+	return guy;
 }

@@ -15,7 +15,7 @@ cp "$GAME/main/video/credits_load.bik" "$GAME/mods/ctv/${MAP}_load.bik"
 rm -f "$GAME/Mods/cooptest/console.log"
 ps() { powershell -NoProfile -ExecutionPolicy Bypass -File "$@"; }
 T0=$(date +%s)
-PID=$(ps "$HERE/bg.ps1" launch 7 "+set fs_game mods/cooptest +set coop_port 28971 +set coop_name Host +set coop_host 1 +set coop_wait 1 +set coop_bot 1 +set start $START +set coop_startmap $MAP +set coop_debug 1 +set coop_test_nolink 1 +set r_mode 640x480 +set vid_xpos 1880 +set vid_ypos 1040" | sed -n 's/pid=//p' | tr -d '\r')
+PID=$(ps "$HERE/bg.ps1" launch 7 "+set fs_game mods/cooptest +set coop_port 28971 +set coop_name Host +set coop_host 1 +set coop_wait 1 +set coop_bot 1 +set start $START +set coop_startmap $MAP +set coop_debug 1 +set coop_test_nolink 1 +set coop_bot_puppet 1 +set r_mode 640x480 +set vid_xpos 1880 +set vid_ypos 1040" | sed -n 's/pid=//p' | tr -d '\r')
 echo "pid $PID"
 wait_for() { for i in $(seq 1 "$2"); do grep -qE "$1" "$LOG" 2>/dev/null && return 0; sleep 1; done; echo "timeout waiting for $1"; return 1; }
 wait_for 'postinit' 240 || { ps "$HERE/bg.ps1" kill "$PID"; exit 1; }
