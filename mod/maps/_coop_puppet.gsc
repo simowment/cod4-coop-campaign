@@ -15,6 +15,11 @@ puppet_precache()
 	level.coop.remote_weapon = [];
 	level.coop.known_weapons = [];
 	level.coop.shot_seen = [];
+	// custom character skin from the mod's own mod.ff (tools/skin/rebind.py); must be precached before
+	// the level's first wait
+	level.coop.skin = getdvar( "coop_skin" );
+	if ( level.coop.skin != "" )
+		precachemodel( level.coop.skin );
 }
 
 init()
@@ -71,6 +76,16 @@ init()
 find_character()
 {
 	c = level.coop;
+	if ( c.skin != "" )
+	{
+		ch = spawnstruct();
+		ch.model = c.skin;
+		ch.attach_models = [];
+		ch.attach_tags = [];
+		c.character = ch;
+		maps\_coop::log( "puppet character skin " + c.skin );
+		return;
+	}
 	for ( tries = 0; tries < 200 && !isdefined( c.character ); tries++ )
 	{
 		allies = getaiarray( "allies" );

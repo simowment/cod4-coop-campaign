@@ -73,6 +73,16 @@ def main():
             shutil.copyfile(s, d)
             c += 1
     print('copied mod files:', c)
+    # custom character skins built by tools/skin/rebind.py + the OAT Linker: mod.ff plus loose .iwi textures
+    skins = os.path.join(ROOT, 'build', 'skins')
+    sff = os.path.join(skins, 'zone_out', 'mod.ff')
+    if os.path.isfile(sff):
+        shutil.copyfile(sff, os.path.join(out, 'mod.ff'))
+        os.makedirs(os.path.join(out, 'images'), exist_ok=True)
+        for fn in os.listdir(os.path.join(skins, 'images')):
+            if fn.endswith('.iwi'):
+                shutil.copyfile(os.path.join(skins, 'images', fn), os.path.join(out, 'images', fn))
+        print('installed skins mod.ff')
     for extra in [x for x in a.also.split(',') if x]:
         dst = os.path.join(a.game, 'Mods', extra)
         shutil.copytree(out, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns('console.log'))

@@ -140,3 +140,16 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
   smooth crossfade into idle.
 - AI avatars (_coop_avatar.gsc, real friendly AI steered to the pose) need path nodes; killhouse has none
   near the start (357 nodes, 0 within 800 units), so they are off by default (+set coop_avatar 1 to try).
+
+## Custom character skins (2026-11-11)
+- `python tools/skin/rebind.py <character.glb> <name>` rebinds a rigged humanoid onto the CoD4 soldier skeleton
+  (dumped from killhouse.ff body_complete_sp_sas_ct_charles with OAT Unlinker): CoD space (Y up, inches, +X
+  forward), scale to soldier head height, pose limb by limb onto the CoD rest pose, move each vertex onto the
+  mapped CoD bone, unmapped bones (cloth, hair, props) merge into their mapped ancestor, weapon geometry dropped.
+  Writes GLB (OAT Linker refuses external .bin), xmodel json, material (template mtl_spotlightvechicle_off,
+  techset mc_l_sm_r0c0) and the texture as .iwi (OAT ImageConverter --iw3).
+- Link: `Linker.exe -b build/skins --add-asset-search-path . --source-search-path ./zone_source --load common.ff
+  --output-folder ./zone_out mod` -> mod.ff. iw3sp loads Mods/<fs_game>/mod.ff after common. The image is NOT
+  embedded: ship images/<name>.iwi loose next to mod.ff (build.py does).
+- Game: +set coop_skin coop_<name> precaches the model and dresses every squadmate puppet with it.
+- Verified: Draven (League rig, 80 bones) in killhouse, every pose renders textured and animated.
