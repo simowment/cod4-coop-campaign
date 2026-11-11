@@ -59,7 +59,9 @@ Limits:
 - FBX must be exported to GLB first, or use the DAE if the model comes with one.
 - Body parts are placed on the soldier's joints, so very stylized proportions get stretched limbs or a head
   that rises above the soldier.
-- Only the first texture layer of each material is used.
+- Only the first texture layer of each material is used, unless a `--layers` preset says how to bake the layers.
+  Some game rips need one, for example animated eye atlases plus pupils on extra UV sets. Example:
+  `tools/skin/presets/mario_party_star_rush_luigi.json`.
 
 ### How the connection works
 

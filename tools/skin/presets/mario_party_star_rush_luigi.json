@@ -1,0 +1,25 @@
+{
+  "_note": "3DS Mario Party Star Rush pc02 (Luigi): eyelid/blink atlas of 8 frames (frame 0 = open eyes), pupils on UV sets 1 and 2",
+  "materials": {
+    "luigi_eye_m": {
+      "atlas": [
+        8,
+        1,
+        0
+      ],
+      "multiply": [
+        [
+          "pc02_eye.png",
+          1,
+          "+x"
+        ],
+        [
+          "pc02_eye.png",
+          2,
+          "-x"
+        ]
+      ],
+      "size": 256
+    }
+  }
+}

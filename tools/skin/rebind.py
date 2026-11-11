@@ -241,7 +241,11 @@ def load_dae(path):
                 if any(int(x) != 3 for x in tri.find(q('vcount')).text.split()):
                     sys.exit('polylist with non-triangle faces: triangulate the model first')
             pairs = np.c_[idx[:, voff], idx[:, toff]]
-            uniq, inv = np.unique(pairs, axis=0, return_inverse=True)
+            uniq, first, inv = np.unique(pairs, axis=0, return_index=True, return_inverse=True)
+            sets = []
+            for i in sorted((i for i in inputs if i.get('semantic') == 'TEXCOORD'), key=lambda i: int(i.get('set', '0'))):
+                Ts = floats(ref(i.get('source')).find(q('float_array'))).reshape(-1, 2)
+                sets.append(Ts[idx[first, int(i.get('offset'))]])
             vi, ti = uniq[:, 0], uniq[:, 1]
             pos = P[vi]
             uv = (T[ti] * np.array([1, -1]) + np.array([0, 1])) if T is not None else np.zeros((len(vi), 2))  # DAE v up -> glTF v down
@@ -255,10 +259,96 @@ def load_dae(path):
             matid = mat_bind.get(tri.get('material'), tri.get('material'))
             imfile = mat_img.get(matid)
             image = Image.open(os.path.join(base, imfile)) if imfile and os.path.isfile(os.path.join(base, imfile)) else None
-            c.prims.append({'pos': pos, 'uv': uv, 'jn': jn, 'w': W, 'tris': np.asarray(inv).reshape(-1, 3), 'image': image})
+            c.prims.append({'pos': pos, 'uv': uv, 'jn': jn, 'w': W, 'tris': np.asarray(inv).reshape(-1, 3), 'image': image,
+                            'mat': matid, 'uvsets': sets, 'dir': base})
     if not c.prims:
         sys.exit('no skinned mesh in %s (the model needs a rig: see Mesh2Motion for unrigged models)' % path)
     return c
+
+
+def bake_layers(ch, cfg):
+    """Some game rips use layered materials (e.g. 3DS eyes: an eyelid/blink atlas picked by a texture
+    matrix, plus pupils on other UV sets). CoD4 gets one texture per material, so bake them:
+      {"materials": {"<material id>": {"atlas": [columns, rows, frame],
+                                       "multiply": [["pupil.png", uvset], ...], "size": 256}}}
+    The atlas frame becomes the base (the mesh's UV set 0 is already in single-frame space), and each
+    multiply layer is sampled through its own UV set (outside 0..1 counts as white, i.e. no change)."""
+    for pr in ch.prims:
+        spec = cfg.get('materials', {}).get(pr.get('mat'))
+        if not spec:
+            continue
+        size = spec.get('size', 256)
+        base = pr['image'].convert('RGBA')
+        if 'atlas' in spec:
+            cols, rows, fr = spec['atlas']
+            fw, fh = base.width // cols, base.height // rows
+            x, y = (fr % cols) * fw, (fr // cols) * fh
+            base = base.crop((x, y, x + fw, y + fh))
+        uv0 = pr['uvsets'][0]
+        # layers tied to one side of the body ("+x"/"-x", e.g. one pupil per eye) need their own copy of
+        # the texture: the baked texture gets one column per side and those triangles' UVs move into it
+        sides = sorted({l[2] for l in spec.get('multiply', []) if len(l) > 2})
+        cols_out = max(1, len(sides))
+        cx = pr['pos'][pr['tris']].mean(1)[:, 0]
+        tri_col = np.zeros(len(pr['tris']), int)
+        for k, sd in enumerate(sides):
+            tri_col[(cx > 0) if sd == '+x' else (cx <= 0)] = k
+        one = np.asarray(base.resize((size, size), Image.LANCZOS)).astype(float) / 255
+        out = np.concatenate([one] * cols_out, axis=1)
+        for layer_spec in spec.get('multiply', []):
+            img_name, uvset = layer_spec[0], layer_spec[1]
+            col = sides.index(layer_spec[2]) if len(layer_spec) > 2 else None
+            layer = np.asarray(Image.open(os.path.join(pr['dir'], img_name)).convert('RGBA')).astype(float) / 255
+            lh, lw = layer.shape[:2]
+            uvl = pr['uvsets'][uvset]
+            mult = np.ones((size, size * cols_out, 3))
+            for ti, t in enumerate(pr['tris']):
+                if col is not None and tri_col[ti] != col:
+                    continue
+                xo = (tri_col[ti] if col is not None else 0) * size
+                # texel space of the baked texture: u right, v down (DAE v up)
+                P = np.array([[uv0[i][0] % 1.0 * size, (1 - uv0[i][1] % 1.0) * size] for i in t])
+                L = uvl[t]
+                x0, y0 = np.floor(P.min(0)).astype(int)
+                x1, y1 = np.ceil(P.max(0)).astype(int)
+                M = np.array([[P[0][0] - P[2][0], P[1][0] - P[2][0]], [P[0][1] - P[2][1], P[1][1] - P[2][1]]])
+                if abs(np.linalg.det(M)) < 1e-9:
+                    continue
+                Mi = np.linalg.inv(M)
+                for yy in range(max(y0, 0), min(y1 + 1, size)):
+                    for xx in range(max(x0, 0), min(x1 + 1, size)):
+                        if col is None:
+                            xo = 0
+                        l1, l2 = Mi @ (np.array([xx + 0.5, yy + 0.5]) - P[2])
+                        l3 = 1 - l1 - l2
+                        if min(l1, l2, l3) < -0.02:
+                            continue
+                        u, v = l1 * L[0] + l2 * L[1] + l3 * L[2]
+                        if 0 <= u <= 1 and 0 <= v <= 1:
+                            px = layer[min(int((1 - v) * lh), lh - 1), min(int(u * lw), lw - 1)]
+                            a_ = px[3]
+                            mult[yy, xx + xo] *= px[:3] * a_ + (1 - a_)
+            out[..., :3] *= mult
+        pr['image'] = Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8), 'RGBA')
+        # the baked texture is the single frame: map UV set 0 straight onto it
+        uvo = np.c_[uv0[:, 0] % 1.0, 1 - uv0[:, 1] % 1.0]
+        if cols_out > 1:
+            # split shared vertices so each side's triangles point into their own column
+            newpos, newuv, newjn, neww, newtris = [], [], [], [], []
+            for ti, t in enumerate(pr['tris']):
+                row = []
+                for i in t:
+                    newpos.append(pr['pos'][i])
+                    newuv.append([(uvo[i][0] + tri_col[ti]) / cols_out, uvo[i][1]])
+                    newjn.append(pr['jn'][i])
+                    neww.append(pr['w'][i])
+                    row.append(len(newpos) - 1)
+                newtris.append(row)
+            pr['pos'], pr['jn'], pr['w'] = np.array(newpos), newjn, np.array(neww)
+            pr['tris'] = np.array(newtris)
+            uvo = np.array(newuv)
+        pr['uv'] = uvo
+        print('baked layered material', pr['mat'])
 
 
 def tokens(name):
@@ -402,6 +492,7 @@ def main():
     ap.add_argument('--out', default=os.path.join(os.path.dirname(os.path.dirname(HERE)), 'build', 'skins'))
     ap.add_argument('--keep-weapons', action='store_true')
     ap.add_argument('--preview', help='also render a front/side preview png next to the stock soldier')
+    ap.add_argument('--layers', help='json describing layered materials to bake (see tools/skin/presets)')
     a = ap.parse_args()
     name = re.sub(r'[^a-z0-9_]', '_', a.name.lower())
     out = os.path.abspath(a.out)
@@ -414,6 +505,9 @@ def main():
         sys.exit('FBX: export it as GLB (Blender or Mesh2Motion), or use the .dae if the rip has one')
     else:
         sys.exit('unsupported format ' + ext)
+
+    if a.layers:
+        bake_layers(ch, json.load(open(a.layers)))
 
     cod = Gltf(a.cod)
     cskin = cod.j['skins'][0]
