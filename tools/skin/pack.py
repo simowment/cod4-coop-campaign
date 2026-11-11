@@ -22,10 +22,13 @@ def main():
     models = sorted(f[:-5] for f in os.listdir(xdir) if f.endswith('.json')) if os.path.isdir(xdir) else []
     if not models:
         sys.exit('no skins staged: run tools/skin/rebind.py first')
+    import json
     lines = ['>game,IW3', '', 'techniqueset,,mc_l_sm_r0c0', 'image,,$identitynormalmap']
     for m in models:
-        name = m[len('coop_'):]
-        lines += ['image,coop_%s_col' % name, 'material,mc/mtl_coop_%s' % name, 'xmodel,%s' % m]
+        manifest = os.path.join(xdir, m + '.skin')
+        if not os.path.isfile(manifest):
+            sys.exit('%s was staged by an older rebind.py: run rebind.py again for it' % m)
+        lines += json.load(open(manifest))['assets']
     os.makedirs(os.path.join(SKINS, 'zone_source'), exist_ok=True)
     open(os.path.join(SKINS, 'zone_source', 'mod.zone'), 'w').write('\n'.join(lines) + '\n')
     r = subprocess.run([LINKER, '-b', '.', '--add-asset-search-path', '.', '--source-search-path', './zone_source',

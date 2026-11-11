@@ -38,18 +38,28 @@ Pick a **Skin** next to your name (and a skin for your bots on the host tab). Yo
 everyone who has that skin in their skin pack sees you wearing it. Anyone without it sees the normal soldier.
 Everyone should install the same skin pack.
 
-Making a skin from any rigged humanoid GLB (needs [OpenAssetTools](https://github.com/Laupetin/OpenAssetTools)):
+Making a skin from a rigged humanoid (GLB/glTF or Collada DAE; needs [OpenAssetTools](https://github.com/Laupetin/OpenAssetTools)):
 
 ```bash
-python tools/skin/rebind.py path/to/character.glb mychar
+python tools/skin/rebind.py path/to/character.glb mychar --preview mychar.png
 python tools/skin/pack.py
 python tools/build.py
 ```
 
-`rebind.py` moves the mesh onto CoD4's soldier skeleton: it poses the limbs, remaps the skin weights, merges cloth
-and hair bones into their parents and drops weapon props. `pack.py` links every staged skin into the skin pack
-(`mod.ff`), and `build.py` installs it. Standard humanoid rigs map automatically; other bone names go in the
-table in `rebind.py`.
+`rebind.py` finds each bone's role (pelvis, spine, arms, legs and fingers) from its name and the hierarchy, so
+Mixamo, VRM/VRChat, Unreal, League and Nintendo-style rigs map without setup. It works out which way the model
+faces, poses it onto CoD4's soldier skeleton, remaps the skin weights and merges cloth, hair and attach
+bones into their parents. It drops weapon props, and gives every texture its own material. `--preview`
+renders the result next to a stock soldier. `pack.py` links every staged skin into the skin pack (`mod.ff`),
+and `build.py` installs it.
+
+Limits:
+- The model must already be rigged. For unrigged meshes, rig them first with
+  [Mesh2Motion](https://github.com/Mesh2Motion/mesh2motion-desktop) (Human template, export GLB).
+- FBX must be exported to GLB first, or use the DAE if the model comes with one.
+- Body parts are placed on the soldier's joints, so very stylized proportions get stretched limbs or a head
+  that rises above the soldier.
+- Only the first texture layer of each material is used.
 
 ### How the connection works
 
