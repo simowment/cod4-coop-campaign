@@ -32,9 +32,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from gltfio import Gltf  # noqa: E402
 
-DEFAULT_COD = r'C:\Users\got\cod4-decomp\oat_dump\killhouse\model_export\body_complete_sp_sas_ct_charles_lod0.gltf'
-OAT_IMAGECONV = r'C:\Users\got\tools\oat\ImageConverter.exe'
-TEMPLATE_MATERIAL = r'C:\Users\got\cod4-decomp\oat_dump\killhouse_mat\materials\mc\mtl_spotlightvechicle_off.json'
+import skinenv  # noqa: E402
+DEFAULT_COD = skinenv.COD_BODY
+OAT_IMAGECONV = skinenv.IMAGECONV
+TEMPLATE_MATERIAL = skinenv.TEMPLATE_MATERIAL
 
 
 class Char:
@@ -44,6 +45,94 @@ class Char:
         self.bind = {}         # name -> 4x4 world bind matrix
         self.prims = []        # pos (n,3), uv (n,2), jn (n lists of bone names), w (n,k), tris (m,3), image (PIL or None)
         self.up_is_z = False
+        self.rigged = True
+
+
+def load_obj(path):
+    """Wavefront OBJ (+ .mtl map_Kd textures): always unrigged."""
+    c = Char()
+    c.rigged = False
+    base = os.path.dirname(path)
+    vs, vts = [], []
+    groups = {}
+    mtl_tex = {}
+    cur = None
+    for line in open(path, encoding='latin-1'):
+        t = line.split()
+        if not t:
+            continue
+        if t[0] == 'v':
+            vs.append([float(x) for x in t[1:4]])
+        elif t[0] == 'vt':
+            vts.append([float(t[1]), float(t[2]) if len(t) > 2 else 0.0])
+        elif t[0] == 'mtllib':
+            mp = os.path.join(base, ' '.join(t[1:]))
+            if os.path.isfile(mp):
+                m = None
+                for ml in open(mp, encoding='latin-1'):
+                    mt = ml.split()
+                    if mt and mt[0] == 'newmtl':
+                        m = ' '.join(mt[1:])
+                    elif mt and mt[0].lower() == 'map_kd' and m:
+                        mtl_tex[m] = os.path.join(base, mt[-1])
+        elif t[0] == 'usemtl':
+            cur = ' '.join(t[1:])
+        elif t[0] == 'f':
+            corners = []
+            for f in t[1:]:
+                parts = f.split('/')
+                vi = int(parts[0])
+                ti = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+                corners.append((vi - 1 if vi > 0 else len(vs) + vi, (ti - 1 if ti > 0 else len(vts) + ti) if ti else -1))
+            for k in range(1, len(corners) - 1):
+                groups.setdefault(cur, []).append((corners[0], corners[k], corners[k + 1]))
+    V = np.array(vs, float)
+    T = np.array(vts, float) if vts else np.zeros((1, 2))
+    for m, faces in groups.items():
+        keys = {}
+        pos, uv, tris = [], [], []
+        for f in faces:
+            row = []
+            for vi, ti in f:
+                if (vi, ti) not in keys:
+                    keys[(vi, ti)] = len(pos)
+                    pos.append(V[vi])
+                    uv.append([T[ti][0], 1 - T[ti][1]] if ti >= 0 else [0, 0])  # OBJ v up -> glTF v down
+                row.append(keys[(vi, ti)])
+            tris.append(row)
+        tex = mtl_tex.get(m)
+        c.prims.append({'pos': np.array(pos), 'uv': np.array(uv), 'tris': np.array(tris),
+                        'image': Image.open(tex) if tex and os.path.isfile(tex) else None})
+    return c
+
+
+def fbx_to_glb(path):
+    """FBX through Blender (PATH or the BLENDER environment variable), if available."""
+    import shutil
+    import tempfile
+    blender = os.environ.get('BLENDER') or shutil.which('blender')
+    if not blender:
+        sys.exit('FBX needs Blender to convert it: install Blender (or set BLENDER=path\\to\\blender.exe), '
+                 'or export the model as GLB')
+    out = os.path.join(tempfile.mkdtemp(), 'model.glb')
+    script = ('import bpy,sys;bpy.ops.wm.read_factory_settings(use_empty=True);'
+              'bpy.ops.import_scene.fbx(filepath=sys.argv[-2]);'
+              'bpy.ops.export_scene.gltf(filepath=sys.argv[-1],export_format="GLB")')
+    subprocess.run([blender, '-b', '--python-expr', script, '--', path, out], check=True, capture_output=True)
+    return out
+
+
+def load_any(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext in ('.glb', '.gltf'):
+        return load_gltf(path)
+    if ext == '.dae':
+        return load_dae(path)
+    if ext == '.obj':
+        return load_obj(path)
+    if ext == '.fbx':
+        return load_gltf(fbx_to_glb(path))
+    sys.exit('unsupported format %s (use GLB, glTF, DAE, OBJ or FBX)' % ext)
 
 
 def load_gltf(path):
@@ -69,7 +158,18 @@ def load_gltf(path):
 
     skinned = [i for i, n in enumerate(g.nodes) if 'mesh' in n and 'skin' in n]
     if not skinned:
-        sys.exit('no skinned mesh in %s (the model needs a rig: see Mesh2Motion for unrigged models)' % path)
+        # no rig: keep the meshes (in world space) for autorig.py
+        for ni in [i for i, n in enumerate(g.nodes) if 'mesh' in n]:
+            for pr in g.j['meshes'][g.nodes[ni]['mesh']]['primitives']:
+                at = pr['attributes']
+                pos = g.accessor(at['POSITION']).astype(float)
+                pos = (g.world(ni) @ np.c_[pos, np.ones(len(pos))].T).T[:, :3]
+                n = len(pos)
+                uv = g.accessor(at['TEXCOORD_0']).astype(float) if 'TEXCOORD_0' in at else np.zeros((n, 2))
+                tris = g.accessor(pr['indices']).reshape(-1, 3).astype(int) if 'indices' in pr else np.arange(n).reshape(-1, 3)
+                c.prims.append({'pos': pos, 'uv': uv, 'tris': tris, 'image': image_of(pr.get('material'))})
+        c.rigged = False
+        return c
     for ni in skinned:
         skin = g.j['skins'][g.nodes[ni]['skin']]
         names = [g.nodes[j].get('name') or 'bone%d' % j for j in skin['joints']]
@@ -503,22 +603,27 @@ def main():
     ap.add_argument('character')
     ap.add_argument('name')
     ap.add_argument('--cod', default=DEFAULT_COD)
-    ap.add_argument('--out', default=os.path.join(os.path.dirname(os.path.dirname(HERE)), 'build', 'skins'))
+    ap.add_argument('--out', default=skinenv.WORK)
     ap.add_argument('--keep-weapons', action='store_true')
     ap.add_argument('--preview', help='also render a front/side preview png next to the stock soldier')
     ap.add_argument('--layers', help='json describing layered materials to bake (see tools/skin/presets)')
+    ap.add_argument('--flip', action='store_true', help='auto-rig only: the model faces away (-Z)')
     a = ap.parse_args()
-    name = re.sub(r'[^a-z0-9_]', '_', a.name.lower())
-    out = os.path.abspath(a.out)
-    ext = os.path.splitext(a.character)[1].lower()
-    if ext in ('.glb', '.gltf'):
-        ch = load_gltf(a.character)
-    elif ext == '.dae':
-        ch = load_dae(a.character)
-    elif ext == '.fbx':
-        sys.exit('FBX: export it as GLB (Blender or Mesh2Motion), or use the .dae if the rip has one')
-    else:
-        sys.exit('unsupported format ' + ext)
+    convert(a.character, a.name, out=a.out, cod=a.cod, keep_weapons=a.keep_weapons, preview=a.preview,
+            layers=a.layers, flip=a.flip)
+
+
+def convert(character, name, out=None, cod=DEFAULT_COD, keep_weapons=False, preview=None, layers=None, flip=False):
+    from types import SimpleNamespace
+    a = SimpleNamespace(character=character, cod=cod, keep_weapons=keep_weapons, preview=preview, layers=layers)
+    name = re.sub(r'[^a-z0-9_]', '_', name.lower())
+    skinenv.ensure_all()
+    out = os.path.abspath(out or skinenv.WORK)
+    ch = load_any(character)
+    if not ch.rigged:
+        from autorig import autorig
+        autorig(ch, flip=flip)
+        print('no skeleton found: auto-rigged it (%d bones)' % len(ch.bones))
 
     if a.layers:
         bake_layers(ch, json.load(open(a.layers)))
@@ -737,6 +842,7 @@ def main():
     if a.preview:
         subprocess.run([sys.executable, os.path.join(HERE, 'preview.py'), a.preview, glb, a.cod], check=True)
     print('staged', model, 'in', out)
+    return model
 
 
 if __name__ == '__main__':

@@ -11,13 +11,15 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))
-SKINS = os.path.join(ROOT, 'build', 'skins')
-LINKER = r'C:\Users\got\tools\oat\Linker.exe'
-COMMON = os.path.join(os.path.dirname(ROOT), 'Call of Duty 4-Modern Warfare', 'zone', 'english', 'common.ff')
+sys.path.insert(0, HERE)
+import skinenv  # noqa: E402
+SKINS = skinenv.WORK
+LINKER = skinenv.LINKER
+COMMON = os.path.join(skinenv.ZONES, 'common.ff')
 
 
 def main():
+    skinenv.ensure_all()
     xdir = os.path.join(SKINS, 'xmodel')
     models = sorted(f[:-5] for f in os.listdir(xdir) if f.endswith('.json')) if os.path.isdir(xdir) else []
     if not models:

@@ -38,12 +38,18 @@ Pick a **Skin** next to your name (and a skin for your bots on the host tab). Yo
 everyone who has that skin in their skin pack sees you wearing it. Anyone without it sees the normal soldier.
 Everyone should install the same skin pack.
 
-Making a skin from a rigged humanoid (GLB/glTF or Collada DAE; needs [OpenAssetTools](https://github.com/Laupetin/OpenAssetTools)):
+**Adding skins from the launcher:** open the **Skins** tab, click **Add character…** and pick a GLB, glTF, DAE,
+OBJ or FBX file (FBX needs Blender). Models without a skeleton are **rigged automatically**: they should stand
+in a T- or A-pose, and you tick "faces away" if the result comes out backwards. The tab shows a preview, and
+**Remove** drops a skin. It needs Python 3 with `numpy` and `pillow`. On first use it downloads
+OpenAssetTools and reads the soldier skeleton from your own game files. Everything lives in `coop_skins/`
+next to the game.
+
+From the command line (same tool):
 
 ```bash
-python tools/skin/rebind.py path/to/character.glb mychar --preview mychar.png
-python tools/skin/pack.py
-python tools/build.py
+python tools/skin/addskin.py add path/to/character.glb mychar
+python tools/skin/addskin.py remove mychar
 ```
 
 `rebind.py` finds each bone's role (pelvis, spine, arms, legs and fingers) from its name and the hierarchy, so
@@ -54,8 +60,9 @@ renders the result next to a stock soldier. `pack.py` links every staged skin in
 and `build.py` installs it.
 
 Limits:
-- The model must already be rigged. For unrigged meshes, rig them first with
-  [Mesh2Motion](https://github.com/Mesh2Motion/mesh2motion-desktop) (Human template, export GLB).
+- The auto-rig handles a humanoid in a T- or A-pose. It finds the shoulders, crotch and neck from the body
+  shape, so cartoon proportions work. For odd poses, rigging in
+  [Mesh2Motion](https://github.com/Mesh2Motion/mesh2motion-desktop) first gives better weights.
 - FBX must be exported to GLB first, or use the DAE if the model comes with one.
 - Body parts are placed on the soldier's joints, so very stylized proportions get stretched limbs or a head
   that rises above the soldier.

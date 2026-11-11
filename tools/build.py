@@ -73,8 +73,17 @@ def main():
             shutil.copyfile(s, d)
             c += 1
     print('copied mod files:', c)
+    # the skin tools, for the launcher's Skins tab
+    st = os.path.join(out, 'skintool')
+    os.makedirs(st, exist_ok=True)
+    for fn in os.listdir(os.path.join(HERE, 'skin')):
+        src = os.path.join(HERE, 'skin', fn)
+        if fn.endswith('.py'):
+            shutil.copyfile(src, os.path.join(st, fn))
+        elif os.path.isdir(src) and fn == 'presets':
+            shutil.copytree(src, os.path.join(st, fn), dirs_exist_ok=True)
     # custom character skins built by tools/skin/rebind.py + the OAT Linker: mod.ff plus loose .iwi textures
-    skins = os.path.join(ROOT, 'build', 'skins')
+    skins = os.path.join(a.game, 'coop_skins', 'work')  # tools/skin/skinenv.py
     sff = os.path.join(skins, 'zone_out', 'mod.ff')
     if os.path.isfile(sff):
         shutil.copyfile(sff, os.path.join(out, 'mod.ff'))

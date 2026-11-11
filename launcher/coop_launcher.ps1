@@ -187,18 +187,22 @@ $font = New-Object System.Drawing.Font("Segoe UI", 10); $form.Font = $font
 $lblName = New-Object System.Windows.Forms.Label; $lblName.Text = "Your name"; $lblName.Location = "16,16"; $lblName.AutoSize = $true
 $txtName = New-Object System.Windows.Forms.TextBox; $txtName.Location = "110,13"; $txtName.Width = 170; $txtName.Text = $settings.name; $txtName.MaxLength = 24
 # skins in the installed skin pack (tools/skin): everyone in the session needs the same pack to see them
-$SkinNames = @()
 $skinFile = Join-Path $GameDir "Mods\coop\skins.txt"
-if (Test-Path $skinFile) { $SkinNames = @(Get-Content $skinFile | Where-Object { $_.Trim() }) }
+function Read-SkinNames { if (Test-Path $skinFile) { return @(Get-Content $skinFile | Where-Object { $_.Trim() }) } return @() }
+$script:SkinNames = @(Read-SkinNames)
+function Fill-SkinBox($b, [string]$current) {
+    $b.Items.Clear()
+    [void]$b.Items.Add("Soldier (default)")
+    foreach ($n in $script:SkinNames) { [void]$b.Items.Add(($n -replace '^coop_', '')) }
+    $b.SelectedIndex = 0
+    for ($i = 0; $i -lt $script:SkinNames.Count; $i++) { if ($script:SkinNames[$i] -eq $current) { $b.SelectedIndex = $i + 1 } }
+}
 function New-SkinBox([string]$current, [string]$loc, [int]$w) {
     $b = New-Object System.Windows.Forms.ComboBox; $b.DropDownStyle = "DropDownList"; $b.Location = $loc; $b.Width = $w
-    [void]$b.Items.Add("Soldier (default)")
-    foreach ($n in $SkinNames) { [void]$b.Items.Add(($n -replace '^coop_', '')) }
-    $b.SelectedIndex = 0
-    for ($i = 0; $i -lt $SkinNames.Count; $i++) { if ($SkinNames[$i] -eq $current) { $b.SelectedIndex = $i + 1 } }
+    Fill-SkinBox $b $current
     return $b
 }
-function Get-SkinChoice($b) { if ($b.SelectedIndex -le 0) { return "" } return $SkinNames[$b.SelectedIndex - 1] }
+function Get-SkinChoice($b) { if ($b.SelectedIndex -le 0) { return "" } return $script:SkinNames[$b.SelectedIndex - 1] }
 $lblSkin = New-Object System.Windows.Forms.Label; $lblSkin.Text = "Skin"; $lblSkin.Location = "292,16"; $lblSkin.AutoSize = $true
 $cmbSkin = New-SkinBox $settings.skin "330,13" 160
 $form.Controls.AddRange(@($lblName, $txtName, $lblSkin, $cmbSkin))
@@ -206,7 +210,8 @@ $form.Controls.AddRange(@($lblName, $txtName, $lblSkin, $cmbSkin))
 $tabs = New-Object System.Windows.Forms.TabControl; $tabs.Location = "12,48"; $tabs.Size = "484,360"
 $tabHost = New-Object System.Windows.Forms.TabPage; $tabHost.Text = "Host a game"
 $tabJoin = New-Object System.Windows.Forms.TabPage; $tabJoin.Text = "Join a friend"
-$tabs.TabPages.AddRange(@($tabHost, $tabJoin)); $form.Controls.Add($tabs)
+$tabSkins = New-Object System.Windows.Forms.TabPage; $tabSkins.Text = "Skins"
+$tabs.TabPages.AddRange(@($tabHost, $tabJoin, $tabSkins)); $form.Controls.Add($tabs)
 
 # --- host tab
 $lblMis = New-Object System.Windows.Forms.Label; $lblMis.Text = "Mission"; $lblMis.Location = "12,16"; $lblMis.AutoSize = $true
@@ -308,6 +313,80 @@ $btnJoinLan.Add_Click({
     $g = $script:lanGames[$i]; Join-Address $g.ip $g.port
 })
 
+# --- skins tab: add any humanoid model (rigged or not), preview, remove. Runs the skin tools (Python) ---
+$SkinTool = Join-Path $GameDir "Mods\coop\skintool\addskin.py"
+$PreviewDir = Join-Path $GameDir "coop_skins\work\previews"
+$lstSkins = New-Object System.Windows.Forms.ListBox; $lstSkins.Location = "12,12"; $lstSkins.Size = "150,200"
+$picSkin = New-Object System.Windows.Forms.PictureBox; $picSkin.Location = "172,12"; $picSkin.Size = "290,200"; $picSkin.SizeMode = "Zoom"; $picSkin.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 48)
+$btnAddSkin = New-Object System.Windows.Forms.Button; $btnAddSkin.Text = "Add character..."; $btnAddSkin.Location = "12,218"; $btnAddSkin.Size = "150,30"
+$btnRemoveSkin = New-Object System.Windows.Forms.Button; $btnRemoveSkin.Text = "Remove"; $btnRemoveSkin.Location = "12,252"; $btnRemoveSkin.Size = "150,28"
+$chkFlip = New-Object System.Windows.Forms.CheckBox; $chkFlip.Text = "faces away (auto-rig)"; $chkFlip.Location = "172,220"; $chkFlip.AutoSize = $true
+$txtSkinLog = New-Object System.Windows.Forms.TextBox; $txtSkinLog.Multiline = $true; $txtSkinLog.ReadOnly = $true; $txtSkinLog.ScrollBars = "Vertical"; $txtSkinLog.Location = "172,244"; $txtSkinLog.Size = "290,80"; $txtSkinLog.Font = New-Object System.Drawing.Font("Consolas", 8)
+$txtSkinLog.Text = "Any humanoid model: GLB, glTF, DAE, OBJ (FBX needs Blender). Rigged or not: models without a skeleton are rigged automatically (stand in a T- or A-pose). Friends need the same skins to see them."
+$tabSkins.Controls.AddRange(@($lstSkins, $picSkin, $btnAddSkin, $btnRemoveSkin, $chkFlip, $txtSkinLog))
+function Refresh-Skins {
+    $script:SkinNames = @(Read-SkinNames)
+    $lstSkins.Items.Clear()
+    foreach ($n in $script:SkinNames) { [void]$lstSkins.Items.Add(($n -replace '^coop_', '')) }
+    Fill-SkinBox $cmbSkin $settings.skin
+    Fill-SkinBox $cmbBotSkin $settings.botskin
+}
+function Find-Python {
+    foreach ($c in @("py", "python")) { $g = Get-Command $c -ErrorAction SilentlyContinue; if ($g) { return $g.Source } }
+    return $null
+}
+$lstSkins.Add_SelectedIndexChanged({
+    $i = $lstSkins.SelectedIndex; if ($i -lt 0) { return }
+    $png = Join-Path $PreviewDir ($script:SkinNames[$i] + ".png")
+    if ($picSkin.Image) { $picSkin.Image.Dispose(); $picSkin.Image = $null }
+    if (Test-Path $png) { $bytes = [IO.File]::ReadAllBytes($png); $picSkin.Image = [System.Drawing.Image]::FromStream((New-Object IO.MemoryStream(, $bytes))) }
+})
+$script:skinProc = $null; $script:skinOut = $null
+function Start-SkinTool([string[]]$toolArgs) {
+    $py = Find-Python
+    if (-not $py) { $txtSkinLog.Text = "Python 3 is needed for skins (python.org), with: pip install numpy pillow"; return }
+    if (-not (Test-Path $SkinTool)) { $txtSkinLog.Text = "Skin tools not installed (run tools/build.py)."; return }
+    $script:skinOut = [IO.Path]::GetTempFileName()
+    $pre = @(); if ((Split-Path $py -Leaf) -eq "py.exe") { $pre = @("-3") }
+    $quoted = ($pre + @("`"$SkinTool`"") + ($toolArgs | ForEach-Object { "`"$_`"" })) -join " "
+    $env:COOP_GAMEDIR = $GameDir
+    $script:skinProc = Start-Process -FilePath $py -ArgumentList $quoted -NoNewWindow -PassThru -RedirectStandardOutput $script:skinOut -RedirectStandardError "$($script:skinOut).err"
+    $btnAddSkin.Enabled = $false; $btnRemoveSkin.Enabled = $false
+    $txtSkinLog.Text = "Working... (the first time also sets up the tools, about a minute)"
+}
+$skinTimer = New-Object System.Windows.Forms.Timer; $skinTimer.Interval = 400
+$skinTimer.Add_Tick({
+    if (-not $script:skinProc) { return }
+    $log = ""
+    try { $log = [IO.File]::ReadAllText($script:skinOut) } catch {}
+    $lines = @($log -split "`r?`n" | Where-Object { $_ -and $_ -notmatch '^(Loaded|Building|Writing|Created|Reading|Processing|Unloaded|Finished)' })
+    if ($lines.Count) { $txtSkinLog.Text = ($lines | Select-Object -Last 6) -join "`r`n" }
+    if ($script:skinProc.HasExited) {
+        $err = ""; try { $err = [IO.File]::ReadAllText("$($script:skinOut).err") } catch {}
+        if ($log -notmatch "(?m)^OK" -and $err) { $txtSkinLog.Text += "`r`n" + (($err -split "`r?`n" | Select-Object -Last 4) -join "`r`n") }
+        $script:skinProc = $null
+        $btnAddSkin.Enabled = $true; $btnRemoveSkin.Enabled = $true
+        $sel = $null; if ($log -match "(?m)^OK (coop_\w+)") { $sel = $Matches[1] }
+        Refresh-Skins
+        if ($sel) { $k = [array]::IndexOf($script:SkinNames, $sel); if ($k -ge 0) { $lstSkins.SelectedIndex = $k } }
+    }
+})
+$skinTimer.Start()
+$btnAddSkin.Add_Click({
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Filter = "3D characters|*.glb;*.gltf;*.dae;*.obj;*.fbx|All files|*.*"
+    if ($dlg.ShowDialog() -ne "OK") { return }
+    $name = ([IO.Path]::GetFileNameWithoutExtension($dlg.FileName) -replace '[^A-Za-z0-9_]', '_').ToLower().Trim('_')
+    if (-not $name) { $name = "skin" }
+    $a = @("add", $dlg.FileName, $name); if ($chkFlip.Checked) { $a += "--flip" }
+    Start-SkinTool $a
+})
+$btnRemoveSkin.Add_Click({
+    $i = $lstSkins.SelectedIndex; if ($i -lt 0) { $txtSkinLog.Text = "Pick a skin in the list first."; return }
+    Start-SkinTool @("remove", $script:SkinNames[$i])
+})
+Refresh-Skins
+
 $tabs.Add_SelectedIndexChanged({ if ($tabs.SelectedTab -eq $tabJoin -and $lstLan.Items.Count -eq 0) { $btnFind.PerformClick() } })
 
 # keep the router port open while hosting; close it when the game exits or the launcher closes
@@ -316,4 +395,16 @@ $timer.Add_Tick({ if ($script:hostingProc -and $script:hostingProc.HasExited) { 
 $timer.Start()
 $form.Add_FormClosing({ if ($script:hostingProc) { Close-RouterPort } })
 
+# test hook: render a tab to a PNG without showing the window (COOP_LAUNCHER_SNAPSHOT=<png>[|tab index])
+if ($env:COOP_LAUNCHER_SNAPSHOT) {
+    $parts = $env:COOP_LAUNCHER_SNAPSHOT -split '\|'
+    if ($parts.Count -gt 1) { $tabs.SelectedIndex = [int]$parts[1] }
+    if ($lstSkins.Items.Count) { $lstSkins.SelectedIndex = 0 }
+    $mk = [System.Windows.Forms.Control].GetMethod("CreateHandle", [Reflection.BindingFlags]"NonPublic,Instance")
+    function Make-Handles($c) { $mk.Invoke($c, $null); foreach ($x in $c.Controls) { Make-Handles $x } }
+    Make-Handles $form
+    $bmp = New-Object System.Drawing.Bitmap $form.Width, $form.Height
+    $form.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, $form.Width, $form.Height))
+    $bmp.Save($parts[0]); exit
+}
 [void]$form.ShowDialog()
