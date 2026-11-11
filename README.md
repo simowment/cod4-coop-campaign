@@ -32,6 +32,25 @@ bullets, short bursts), and revives you about 3 seconds after you go down. Durin
 along out of sight. Friends who join see your bots too. A bot never goes down, never triggers story
 events and never holds up a sync point; it doesn't use grenades or launchers.
 
+### Character skins
+
+Pick a **Skin** next to your name (and a skin for your bots on the host tab). Your game announces it, and
+everyone who has that skin in their skin pack sees you wearing it. Anyone without it sees the normal soldier.
+Everyone should install the same skin pack.
+
+Making a skin from any rigged humanoid GLB (needs [OpenAssetTools](https://github.com/Laupetin/OpenAssetTools)):
+
+```bash
+python tools/skin/rebind.py path/to/character.glb mychar
+python tools/skin/pack.py
+python tools/build.py
+```
+
+`rebind.py` moves the mesh onto CoD4's soldier skeleton: it poses the limbs, remaps the skin weights, merges cloth
+and hair bones into their parents and drops weapon props. `pack.py` links every staged skin into the skin pack
+(`mod.ff`), and `build.py` installs it. Standard humanoid rigs map automatically; other bone names go in the
+table in `rebind.py`.
+
 ### How the connection works
 
 - The game uses **UDP port 28970** on the host.

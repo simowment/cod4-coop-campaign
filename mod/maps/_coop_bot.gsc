@@ -209,6 +209,8 @@ bot_think( slot, idx )
 		tick++;
 		now = gettime();
 
+		if ( tick % 100 == 1 )
+			bot_announce_skin( slot );
 		// weapon: announce like a player does (on change, and every few seconds)
 		if ( tick % 20 == 1 )
 		{
@@ -792,6 +794,12 @@ spawn_real_bot( slot, idx )
 		return undefined;
 	}
 	guy.coop_bot_slot = slot;
+	if ( c.bot_skin != "" )
+	{
+		guy detachall(); // a skin is one complete model: drop the soldier's head and gear
+		guy setmodel( c.bot_skin );
+		maps\_coop::log( "bot " + slot + ": wearing " + guy.model + " attachments " + guy getattachsize() );
+	}
 	guy.goalradius = 160 + idx * 48;
 	guy setgoalpos( p.origin ); // never setgoalentity( player ): fatal unless the player is on a friendly chain
 	c.bot_ai[ slot ] = guy;
@@ -836,6 +844,8 @@ bot_ai_think( slot, idx, guy )
 		}
 		tick++;
 		now = gettime();
+		if ( tick % 100 == 1 )
+			bot_announce_skin( slot );
 		if ( tick % 20 == 1 && isdefined( guy.weapon ) && ( guy.weapon != weapon || tick % 100 == 1 ) )
 		{
 			weapon = guy.weapon;
@@ -960,4 +970,13 @@ spawn_ally_ai( pos, yaw, name )
 	guy thread disable_ai_color();
 	guy.fixednode = false; // free to path anywhere, not just to cover nodes
 	return guy;
+}
+
+bot_announce_skin( slot )
+{
+	c = level.coop;
+	if ( c.bot_skin != "" )
+		bot_send( slot, "Z|" + c.bot_skin );
+	else
+		bot_send( slot, "Z|-" );
 }

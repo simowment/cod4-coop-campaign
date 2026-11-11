@@ -411,6 +411,8 @@ track_weapon()
 			last = w;
 			send( "W|" + w );
 		}
+		if ( ticks % 20 == 1 )
+			maps\_coop_puppet::announce_skin();
 		maps\_coop_puppet::learn_local_weapons();
 		wait 0.25;
 	}
@@ -423,6 +425,7 @@ register_handlers()
 	h[ "T" ] = ::ev_trigger;
 	h[ "K" ] = ::ev_kill;
 	h[ "W" ] = maps\_coop_puppet::ev_weapon;
+	h[ "Z" ] = maps\_coop_puppet::ev_skin;
 	h[ "S" ] = ::ev_save;
 	h[ "X" ] = ::ev_fail;
 	h[ "E" ] = ::ev_levelend;

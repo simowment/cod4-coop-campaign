@@ -15,11 +15,16 @@ puppet_precache()
 	level.coop.remote_weapon = [];
 	level.coop.known_weapons = [];
 	level.coop.shot_seen = [];
-	// custom character skin from the mod's own mod.ff (tools/skin/rebind.py); must be precached before
-	// the level's first wait
-	level.coop.skin = getdvar( "coop_skin" );
-	if ( level.coop.skin != "" )
-		precachemodel( level.coop.skin );
+	// character skins from the mod's skin pack (mod.ff, tools/skin): every skin in the pack is precached
+	// (before the level's first wait) so any player's choice can be shown; skins[ slot ] = what each
+	// player asked for ("" = the borrowed soldier)
+	c = level.coop;
+	c.skin_list = maps\_coop_skins::list();
+	for ( i = 0; i < c.skin_list.size; i++ )
+		precachemodel( c.skin_list[ i ] );
+	c.skins = [];
+	c.my_skin = valid_skin( getdvar( "coop_myskin" ) );
+	c.bot_skin = valid_skin( getdvar( "coop_botskin" ) );
 }
 
 init()
@@ -76,16 +81,7 @@ init()
 find_character()
 {
 	c = level.coop;
-	if ( c.skin != "" )
-	{
-		ch = spawnstruct();
-		ch.model = c.skin;
-		ch.attach_models = [];
-		ch.attach_tags = [];
-		c.character = ch;
-		maps\_coop::log( "puppet character skin " + c.skin );
-		return;
-	}
+
 	for ( tries = 0; tries < 200 && !isdefined( c.character ); tries++ )
 	{
 		allies = getaiarray( "allies" );
@@ -158,6 +154,11 @@ update_all()
 			continue;
 		}
 		p = c.puppets[ slot ];
+		if ( isdefined( p ) && p.coop_model != skin_of( slot ) )
+		{
+			remove( slot ); // the player picked another skin: dress a fresh puppet
+			p = undefined;
+		}
 		if ( !isdefined( p ) )
 		{
 			if ( !isdefined( c.character ) )
@@ -173,11 +174,18 @@ spawn_puppet( slot )
 	c = level.coop;
 	org = ( fgetarg( slot, 0 ), fgetarg( slot, 1 ), fgetarg( slot, 2 ) );
 	p = spawn( "script_model", org );
-	p setmodel( c.character.model );
+	skin = skin_of( slot );
+	p.coop_model = skin;
+	if ( skin != "" )
+		p setmodel( skin ); // a skin is one complete model, no head or gear attachments
+	else
+	{
+		p setmodel( c.character.model );
+		for ( i = 0; i < c.character.attach_models.size; i++ )
+			p attach( c.character.attach_models[ i ], c.character.attach_tags[ i ], true );
+	}
 	p useAnimTree( #animtree );
 	p notsolid(); // a squadmate never blocks you (it spawns right next to you)
-	for ( i = 0; i < c.character.attach_models.size; i++ )
-		p attach( c.character.attach_models[ i ], c.character.attach_tags[ i ], true );
 	p.team = "allies";
 	p.NoFriendlyfire = true;
 	p.no_friendly_fire_penalty = true;
@@ -641,4 +649,42 @@ set_puppet_anim( name )
 		self setanim( pa, 1, 0.2, rate );
 		self.coop_rate = rate;
 	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// skins: "Z|<model>" announces a player's skin ("-" = none); repeated every few seconds like weapons
+// ---------------------------------------------------------------------------------------------
+
+valid_skin( name )
+{
+	c = level.coop;
+	for ( i = 0; i < c.skin_list.size; i++ )
+		if ( c.skin_list[ i ] == name )
+			return name;
+	return "";
+}
+
+skin_of( slot )
+{
+	c = level.coop;
+	if ( isdefined( c.skins[ slot ] ) )
+		return c.skins[ slot ];
+	return "";
+}
+
+ev_skin( slot, tok )
+{
+	if ( tok.size < 3 )
+		return;
+	// a skin this game does not have in its pack falls back to the normal soldier
+	level.coop.skins[ slot ] = valid_skin( tok[ 2 ] );
+}
+
+announce_skin()
+{
+	c = level.coop;
+	if ( c.my_skin != "" )
+		maps\_coop::send( "Z|" + c.my_skin );
+	else
+		maps\_coop::send( "Z|-" );
 }

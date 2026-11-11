@@ -148,7 +148,7 @@ $Missions = [ordered]@{
     "Game Over (jeepride)" = "jeepride"; "Mile High Club (airplane)" = "airplane"
 }
 
-$settings = @{ name = $env:USERNAME; mission = "cargoship"; squad = 2; bots = 0; lastCode = "" }
+$settings = @{ name = $env:USERNAME; mission = "cargoship"; squad = 2; bots = 0; skin = ""; botskin = ""; lastCode = "" }
 if (Test-Path $SettingsFile) { try { (Get-Content $SettingsFile -Raw | ConvertFrom-Json).psobject.Properties | ForEach-Object { $settings[$_.Name] = $_.Value } } catch {} }
 function Save-Settings { try { $settings | ConvertTo-Json | Set-Content -Path $SettingsFile -Encoding UTF8 } catch {} }
 
@@ -172,7 +172,10 @@ function Get-WindowFix {
 
 function Start-Game([string]$extra) {
     $name = $settings.name -replace '[|~"]', ''
-    $args = "+set fs_game mods/coop +set loc_warnings 0 +set coop_name `"$name`" $(Get-WindowFix) $extra"
+    $skinArgs = ""
+    if ($settings.skin) { $skinArgs += " +set coop_myskin $($settings.skin)" }
+    if ($settings.botskin) { $skinArgs += " +set coop_botskin $($settings.botskin)" }
+    $args = "+set fs_game mods/coop +set loc_warnings 0 +set coop_name `"$name`"$skinArgs $(Get-WindowFix) $extra"
     return Start-Process -FilePath (Join-Path $GameDir "iw3sp.exe") -WorkingDirectory $GameDir -ArgumentList $args -PassThru
 }
 
@@ -182,8 +185,23 @@ $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
 $font = New-Object System.Drawing.Font("Segoe UI", 10); $form.Font = $font
 
 $lblName = New-Object System.Windows.Forms.Label; $lblName.Text = "Your name"; $lblName.Location = "16,16"; $lblName.AutoSize = $true
-$txtName = New-Object System.Windows.Forms.TextBox; $txtName.Location = "110,13"; $txtName.Width = 380; $txtName.Text = $settings.name; $txtName.MaxLength = 24
-$form.Controls.AddRange(@($lblName, $txtName))
+$txtName = New-Object System.Windows.Forms.TextBox; $txtName.Location = "110,13"; $txtName.Width = 170; $txtName.Text = $settings.name; $txtName.MaxLength = 24
+# skins in the installed skin pack (tools/skin): everyone in the session needs the same pack to see them
+$SkinNames = @()
+$skinFile = Join-Path $GameDir "Mods\coop\skins.txt"
+if (Test-Path $skinFile) { $SkinNames = @(Get-Content $skinFile | Where-Object { $_.Trim() }) }
+function New-SkinBox([string]$current, [string]$loc, [int]$w) {
+    $b = New-Object System.Windows.Forms.ComboBox; $b.DropDownStyle = "DropDownList"; $b.Location = $loc; $b.Width = $w
+    [void]$b.Items.Add("Soldier (default)")
+    foreach ($n in $SkinNames) { [void]$b.Items.Add(($n -replace '^coop_', '')) }
+    $b.SelectedIndex = 0
+    for ($i = 0; $i -lt $SkinNames.Count; $i++) { if ($SkinNames[$i] -eq $current) { $b.SelectedIndex = $i + 1 } }
+    return $b
+}
+function Get-SkinChoice($b) { if ($b.SelectedIndex -le 0) { return "" } return $SkinNames[$b.SelectedIndex - 1] }
+$lblSkin = New-Object System.Windows.Forms.Label; $lblSkin.Text = "Skin"; $lblSkin.Location = "292,16"; $lblSkin.AutoSize = $true
+$cmbSkin = New-SkinBox $settings.skin "330,13" 160
+$form.Controls.AddRange(@($lblName, $txtName, $lblSkin, $cmbSkin))
 
 $tabs = New-Object System.Windows.Forms.TabControl; $tabs.Location = "12,48"; $tabs.Size = "484,360"
 $tabHost = New-Object System.Windows.Forms.TabPage; $tabHost.Text = "Host a game"
@@ -200,12 +218,13 @@ $numSq = New-Object System.Windows.Forms.NumericUpDown; $numSq.Location = "100,4
 $lblSq2 = New-Object System.Windows.Forms.Label; $lblSq2.Text = "players before the mission starts"; $lblSq2.Location = "156,52"; $lblSq2.AutoSize = $true
 $lblBots = New-Object System.Windows.Forms.Label; $lblBots.Text = "Bots"; $lblBots.Location = "12,86"; $lblBots.AutoSize = $true
 $numBots = New-Object System.Windows.Forms.NumericUpDown; $numBots.Location = "100,83"; $numBots.Width = 50; $numBots.Minimum = 0; $numBots.Maximum = 3; $numBots.Value = [int]$settings.bots
-$lblBots2 = New-Object System.Windows.Forms.Label; $lblBots2.Text = "AI squadmates (they count toward the squad)"; $lblBots2.Location = "156,86"; $lblBots2.AutoSize = $true
+$lblBots2 = New-Object System.Windows.Forms.Label; $lblBots2.Text = "AI squadmates, wearing"; $lblBots2.Location = "156,86"; $lblBots2.AutoSize = $true
+$cmbBotSkin = New-SkinBox $settings.botskin "318,83" 142
 $btnHost = New-Object System.Windows.Forms.Button; $btnHost.Text = "Start hosting"; $btnHost.Location = "100,116"; $btnHost.Size = "160,34"
 $txtCodes = New-Object System.Windows.Forms.TextBox; $txtCodes.Multiline = $true; $txtCodes.ReadOnly = $true; $txtCodes.Location = "12,158"; $txtCodes.Size = "450,116"
 $txtCodes.Font = New-Object System.Drawing.Font("Consolas", 10); $txtCodes.Text = "Your join code appears here once you start hosting."
 $btnCopy = New-Object System.Windows.Forms.Button; $btnCopy.Text = "Copy join code"; $btnCopy.Location = "12,282"; $btnCopy.Size = "160,32"; $btnCopy.Enabled = $false
-$tabHost.Controls.AddRange(@($lblMis, $cmbMis, $lblSq, $numSq, $lblSq2, $lblBots, $numBots, $lblBots2, $btnHost, $txtCodes, $btnCopy))
+$tabHost.Controls.AddRange(@($lblMis, $cmbMis, $lblSq, $numSq, $lblSq2, $lblBots, $numBots, $lblBots2, $cmbBotSkin, $btnHost, $txtCodes, $btnCopy))
 
 # --- join tab
 $lblCode = New-Object System.Windows.Forms.Label; $lblCode.Text = "Join code"; $lblCode.Location = "12,16"; $lblCode.AutoSize = $true
@@ -224,7 +243,8 @@ $script:lanGames = @()
 
 $btnHost.Add_Click({
     $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
-    $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.squad = [int]$numSq.Value; $settings.bots = [int]$numBots.Value; Save-Settings
+    $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.squad = [int]$numSq.Value; $settings.bots = [int]$numBots.Value
+    $settings.skin = Get-SkinChoice $cmbSkin; $settings.botskin = Get-SkinChoice $cmbBotSkin; Save-Settings
     $btnHost.Enabled = $false; $txtCodes.Text = "Opening the game port on your router..."; $form.Refresh()
     $addr = Get-LocalAddresses
     $lines = @()
@@ -257,7 +277,8 @@ $btnHost.Add_Click({
 $btnCopy.Add_Click({ if ($script:mainCode) { [System.Windows.Forms.Clipboard]::SetText($script:mainCode); $btnCopy.Text = "Copied!" } })
 
 function Join-Address([string]$ip, [int]$port) {
-    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }; Save-Settings
+    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
+    $settings.skin = Get-SkinChoice $cmbSkin; Save-Settings
     [void](Start-Game "+set coop_connect $($ip):$port")
     $form.Close()
 }

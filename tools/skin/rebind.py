@@ -290,8 +290,6 @@ def main():
     import subprocess
     subprocess.run([OAT_IMAGECONV, '--iw3', os.path.join(out, 'images', image + '.dds')], check=True, capture_output=True)
     print('texture', img.size)
-    open(os.path.join(out, 'zone_source', 'mod.zone'), 'w').write(
-        '>game,IW3\n\ntechniqueset,,mc_l_sm_r0c0\nimage,,$identitynormalmap\nimage,%s\nmaterial,%s\nxmodel,%s\n' % (image, material, model))
     print('staged', model, 'in', out)
 
 
