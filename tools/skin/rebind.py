@@ -287,7 +287,7 @@ def bake_layers(ch, cfg):
         uv0 = pr['uvsets'][0]
         # layers tied to one side of the body ("+x"/"-x", e.g. one pupil per eye) need their own copy of
         # the texture: the baked texture gets one column per side and those triangles' UVs move into it
-        sides = sorted({l[2] for l in spec.get('multiply', []) if len(l) > 2})
+        sides = sorted({l[2] for l in spec.get('multiply', []) if len(l) > 2 and isinstance(l[2], str)})
         cols_out = max(1, len(sides))
         cx = pr['pos'][pr['tris']].mean(1)[:, 0]
         tri_col = np.zeros(len(pr['tris']), int)
@@ -295,12 +295,20 @@ def bake_layers(ch, cfg):
             tri_col[(cx > 0) if sd == '+x' else (cx <= 0)] = k
         one = np.asarray(base.resize((size, size), Image.LANCZOS)).astype(float) / 255
         out = np.concatenate([one] * cols_out, axis=1)
+        under = np.ones((size, size * cols_out, 3))  # all "under" layers, composited once at the end
         for layer_spec in spec.get('multiply', []):
             img_name, uvset = layer_spec[0], layer_spec[1]
-            col = sides.index(layer_spec[2]) if len(layer_spec) > 2 else None
+            col = sides.index(layer_spec[2]) if len(layer_spec) > 2 and isinstance(layer_spec[2], str) else None
+            # optional {"scale": k} (or [kx, ky]): the game's texture matrix for this layer, which rips drop;
+            # k > 1 shrinks the layer about the centre of its 0..1 space (e.g. an iris inside the eye white)
+            opts = layer_spec[-1] if isinstance(layer_spec[-1], dict) else {}
+            k = opts.get('scale', 1)
+            k = np.array(k if isinstance(k, list) else [k, k], float)
+            ctr = np.array(opts.get('center', [0.5, 0.5]), float)
             layer = np.asarray(Image.open(os.path.join(pr['dir'], img_name)).convert('RGBA')).astype(float) / 255
             lh, lw = layer.shape[:2]
             uvl = pr['uvsets'][uvset]
+            mode = opts.get('mode', 'multiply')  # "under": the layer lies beneath the base (base alpha shows it)
             mult = np.ones((size, size * cols_out, 3))
             for ti, t in enumerate(pr['tris']):
                 if col is not None and tri_col[ti] != col:
@@ -323,12 +331,18 @@ def bake_layers(ch, cfg):
                         l3 = 1 - l1 - l2
                         if min(l1, l2, l3) < -0.02:
                             continue
-                        u, v = l1 * L[0] + l2 * L[1] + l3 * L[2]
+                        u, v = (l1 * L[0] + l2 * L[1] + l3 * L[2] - ctr) * k + ctr
                         if 0 <= u <= 1 and 0 <= v <= 1:
                             px = layer[min(int((1 - v) * lh), lh - 1), min(int(u * lw), lw - 1)]
                             a_ = px[3]
                             mult[yy, xx + xo] *= px[:3] * a_ + (1 - a_)
-            out[..., :3] *= mult
+            if mode == 'under':
+                under *= mult
+            else:
+                out[..., :3] *= mult
+        a_ = out[..., 3:4]
+        out[..., :3] = out[..., :3] * a_ + under * (1 - a_)
+        out[..., 3] = 1
         pr['image'] = Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8), 'RGBA')
         # the baked texture is the single frame: map UV set 0 straight onto it
         uvo = np.c_[uv0[:, 0] % 1.0, 1 - uv0[:, 1] % 1.0]

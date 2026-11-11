@@ -60,7 +60,8 @@ Limits:
 - Body parts are placed on the soldier's joints, so very stylized proportions get stretched limbs or a head
   that rises above the soldier.
 - Only the first texture layer of each material is used, unless a `--layers` preset says how to bake the layers.
-  Some game rips need one, for example animated eye atlases plus pupils on extra UV sets. Example:
+  Some game rips need one, for example animated eye atlases drawn over pupil layers on extra UV sets
+  (layer modes `multiply` or `under`, optional `scale`, one copy per body side with `+x`/`-x`). Example:
   `tools/skin/presets/mario_party_star_rush_luigi.json`.
 
 ### How the connection works
