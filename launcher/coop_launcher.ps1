@@ -442,6 +442,81 @@ function Sync-SkinPack([string]$ip, [int]$port, $status) {
 }
 
 # ------------------------------------------------------------------------------------------------
+# self-update: the latest GitHub release is checked in the background on start; "Update" downloads its
+# zip, replaces the mod files (keeping skins, settings and the skin pack) and restarts the launcher.
+# ------------------------------------------------------------------------------------------------
+$UpdateRepo = "simowment/cod4-coop-campaign"
+$UpdaterCode = @'
+using System; using System.IO; using System.Net; using System.Threading; using System.Text.RegularExpressions;
+public static class CoopUpdate {
+    public static volatile string Latest = null, ZipUrl = null, Error = null, Status = "";
+    public static volatile bool Checked = false, Downloaded = false;
+    public static volatile string ZipPath = null;
+    public static void Check(string repo) {
+        var t = new Thread(() => {
+            try {
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;   // TLS 1.2
+                var wc = new WebClient();
+                wc.Headers.Add("User-Agent", "cod4-coop-launcher");
+                string j = wc.DownloadString("https://api.github.com/repos/" + repo + "/releases/latest");
+                var tag = Regex.Match(j, "\"tag_name\"\\s*:\\s*\"v?([^\"]+)\"");
+                var zip = Regex.Match(j, "\"browser_download_url\"\\s*:\\s*\"([^\"]+cod4-coop-[^\"]+\\.zip)\"");
+                if (tag.Success) Latest = tag.Groups[1].Value;
+                if (zip.Success) ZipUrl = zip.Groups[1].Value;
+            } catch (Exception e) { Error = e.Message; }
+            Checked = true;
+        });
+        t.IsBackground = true; t.Start();
+    }
+    public static void Download(string url, string dest) {
+        var t = new Thread(() => {
+            try {
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+                var wc = new WebClient();
+                wc.Headers.Add("User-Agent", "cod4-coop-launcher");
+                wc.DownloadProgressChanged += (s, e) => { Status = string.Format("Downloading the update: {0}%", e.ProgressPercentage); };
+                wc.DownloadFileTaskAsync(new Uri(url), dest).Wait();
+                ZipPath = dest; Downloaded = true;
+            } catch (Exception e) { Error = (e.InnerException ?? e).Message; Downloaded = true; }
+        });
+        t.IsBackground = true; t.Start();
+    }
+    // "0.2.10" > "0.2.9"
+    public static bool Newer(string a, string b) {
+        try { return new Version(a) > new Version(b); } catch { return false; }
+    }
+}
+'@
+function Get-InstalledVersion {
+    try { return ([IO.File]::ReadAllText((Join-Path $GameDir "Mods\coop\coop_patches.json")) | ConvertFrom-Json).version } catch { return "0.0.0" }
+}
+function Install-UpdateZip([string]$zipPath) {
+    # files a player owns (their skins, the shared skin pack, settings) are never replaced by an update
+    $keep = '^(Mods/coop/(skins\.txt|mod\.ff|maps/_coop_skins\.gsc|images/coop_[^/]+)|coop_launcher\.json)$'
+    $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
+    try {
+        foreach ($e in $zip.Entries) {
+            if (-not $e.Name) { continue }
+            $rel = $e.FullName -replace '\\', '/'
+            if ($rel -match '\.\.' -or $rel -match '^/') { continue }
+            $dst = Join-Path $GameDir ($rel -replace '/', '\')
+            if ($rel -match $keep -and (Test-Path $dst)) { continue }
+            [void](New-Item -ItemType Directory -Force (Split-Path $dst))
+            try { [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dst, $true) }
+            catch {
+                # d3d9.dll is locked while a game is running: put it next to it, swapped in on the next start
+                if ($rel -eq "d3d9.dll") { [IO.Compression.ZipFileExtensions]::ExtractToFile($e, "$dst.new", $true) } else { throw }
+            }
+        }
+    } finally { $zip.Dispose() }
+}
+# a d3d9.dll update that could not be written because the game was running
+$pendingDll = Join-Path $GameDir "d3d9.dll.new"
+if ((Test-Path $pendingDll) -and -not (Get-Process iw3sp -ErrorAction SilentlyContinue)) {
+    try { Move-Item $pendingDll (Join-Path $GameDir "d3d9.dll") -Force } catch {}
+}
+
+# ------------------------------------------------------------------------------------------------
 # window
 # ------------------------------------------------------------------------------------------------
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -494,7 +569,7 @@ function Start-Game([string]$extra) {
 }
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "CoD4 Coop Campaign"; $form.Size = New-Object System.Drawing.Size(520, 460); $form.StartPosition = "CenterScreen"
+$form.Text = "CoD4 Coop Campaign"; $form.Size = New-Object System.Drawing.Size(520, 484); $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
 $font = New-Object System.Drawing.Font("Segoe UI", 10); $form.Font = $font
 
@@ -521,6 +596,9 @@ $lblSkin = New-Object System.Windows.Forms.Label; $lblSkin.Text = "Skin"; $lblSk
 $cmbSkin = New-SkinBox $settings.skin "330,13" 160
 $form.Controls.AddRange(@($lblName, $txtName, $lblSkin, $cmbSkin))
 
+$btnUpdate = New-Object System.Windows.Forms.Button; $btnUpdate.Location = "330,410"; $btnUpdate.Size = "166,26"; $btnUpdate.Visible = $false
+$lblUpdate = New-Object System.Windows.Forms.Label; $lblUpdate.Location = "14,414"; $lblUpdate.Size = "310,20"; $lblUpdate.Text = ""
+$form.Controls.AddRange(@($btnUpdate, $lblUpdate))
 $tabs = New-Object System.Windows.Forms.TabControl; $tabs.Location = "12,48"; $tabs.Size = "484,360"
 $tabHost = New-Object System.Windows.Forms.TabPage; $tabHost.Text = "Host a game"
 $tabJoin = New-Object System.Windows.Forms.TabPage; $tabJoin.Text = "Join a friend"
@@ -852,6 +930,47 @@ $setupTimer.Add_Tick({
     if ([CoopFF]::Error) { $txtCodes.Text = "Setup failed: $([CoopFF]::Error)`r`nIs this the CoD4 1.0 game folder (iw3sp.exe, zone\english)?" }
     else { $txtCodes.Text = "Ready. Pick a mission and start hosting, or join a friend." }
     $btnHost.Enabled = $true; $btnJoin.Enabled = $true; $btnJoinLan.Enabled = $true
+})
+$script:updateState = "idle"
+$updateTimer = New-Object System.Windows.Forms.Timer; $updateTimer.Interval = 300
+$updateTimer.Add_Tick({
+    try {
+        if ($script:updateState -eq "checking" -and [CoopUpdate]::Checked) {
+            $mine = Get-InstalledVersion
+            if ([CoopUpdate]::Latest -and [CoopUpdate]::ZipUrl -and [CoopUpdate]::Newer([CoopUpdate]::Latest, $mine)) {
+                $lblUpdate.Text = "Version $([CoopUpdate]::Latest) is out (you have $mine)."
+                $btnUpdate.Text = "Update to $([CoopUpdate]::Latest)"; $btnUpdate.Visible = $true
+                $script:updateState = "available"
+            } else {
+                $lblUpdate.Text = "Version $mine" + $(if ([CoopUpdate]::Error) { " (update check failed)" } else { " (up to date)" })
+                $script:updateState = "done"; $updateTimer.Stop()
+            }
+        } elseif ($script:updateState -eq "downloading") {
+            $lblUpdate.Text = [CoopUpdate]::Status
+            if ([CoopUpdate]::Downloaded) {
+                if ([CoopUpdate]::Error) { $lblUpdate.Text = "Update failed: $([CoopUpdate]::Error)"; $btnUpdate.Enabled = $true; $script:updateState = "available"; return }
+                $lblUpdate.Text = "Installing the update..."; $form.Refresh()
+                Install-UpdateZip ([CoopUpdate]::ZipPath)
+                $updateTimer.Stop()
+                # restart the (updated) launcher; first start re-applies the hooks if they changed
+                Start-Process -FilePath (Join-Path $GameDir "CoD4 Coop.bat") -WorkingDirectory $GameDir
+                $form.Close()
+            }
+        }
+    } catch { $lblUpdate.Text = "Update failed: $($_.Exception.Message)"; $script:updateState = "done" }
+})
+$btnUpdate.Add_Click({
+    if (($script:hostingProc -and -not $script:hostingProc.HasExited) -or $script:lobby -or (Get-Process iw3sp -ErrorAction SilentlyContinue)) { $lblUpdate.Text = "Close the lobby/game first, then update."; return }
+    $btnUpdate.Enabled = $false; $script:updateState = "downloading"
+    [CoopUpdate]::Download([CoopUpdate]::ZipUrl, (Join-Path $env:TEMP "cod4-coop-update.zip"))
+})
+$form.Add_Shown({
+    if (-not $env:COOP_NO_UPDATE) {
+        try {
+            if (-not ("CoopUpdate" -as [type])) { Add-Type -TypeDefinition $UpdaterCode -ReferencedAssemblies System.Core }
+            [CoopUpdate]::Check($UpdateRepo); $script:updateState = "checking"; $updateTimer.Start()
+        } catch {}
+    }
 })
 $form.Add_Shown({
     if (-not (Test-CoopInstalled)) {

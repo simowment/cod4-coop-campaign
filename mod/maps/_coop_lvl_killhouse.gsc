@@ -58,6 +58,15 @@
 
 main()
 {
+	// --- shared rifle range: the host's pop-up targets drive everyone's (stock hooks in
+	// killhouse_code.gsc moveTargetDummy / target_down and killhouse.gsc timedTargets) ---
+	level.coop_target_hook = ::target_hook;
+	level.coop_timed_hook = ::timed_hook;
+	h = level.coop.handlers;
+	h[ "KT" ] = ::ev_target;
+	h[ "KH" ] = ::ev_target_hit;
+	level.coop.handlers = h;
+
 	// --- rifle range / sidearm / melee: per-player training progress ---
 	local_flag( "melee_complete" );
 	local_flag( "melee_run_dialog" );
@@ -137,4 +146,84 @@ local_flag_trigger( flagName )
 		n++;
 	}
 	return n;
+}
+
+// ---------------------------------------------------------------------------------------------
+// shared rifle range
+//   host:   every raise / lower / knock-down of a target is broadcast ("KT|<entnum>|<command>")
+//   client: its own script may not move targets; it mirrors the host's, and a hit it lands on a
+//           target is sent to the host ("KH|<entnum>"), whose target then goes down for everyone.
+//   The timed drill on the client counts every knocked-down target instead of its own random pick.
+// ---------------------------------------------------------------------------------------------
+
+target_hook( command )
+{
+	c = level.coop;
+	if ( !maps\_coop::in_coop() )
+		return true;
+	id = self getentnum();
+	if ( c.ishost )
+	{
+		maps\_coop::send( "KT|" + id + "|" + command );
+		return true;
+	}
+	if ( isdefined( self.coop_applying ) )
+		return true;
+	if ( command == "down" )
+		maps\_coop::send( "KH|" + id ); // a hit here: the host decides, and its knock-down comes back
+	return false;
+}
+
+ev_target( slot, tok )
+{
+	if ( level.coop.ishost || tok.size < 4 )
+		return;
+	t = getentbynum( int( tok[ 2 ] ) );
+	if ( !isdefined( t ) )
+		return;
+	t thread apply_target( tok[ 3 ] );
+}
+
+apply_target( command )
+{
+	self.coop_applying = true;
+	if ( command == "down" )
+	{
+		level notify( "coop_target_hit" );
+		self [[ level.coop_fn_target_down ]]();
+	}
+	else
+		self [[ level.coop_fn_move_target ]]( command );
+	self.coop_applying = undefined;
+}
+
+ev_target_hit( slot, tok )
+{
+	if ( !level.coop.ishost || tok.size < 3 )
+		return;
+	t = getentbynum( int( tok[ 2 ] ) );
+	if ( !isdefined( t ) || !isdefined( t.raised ) || !t.raised || ( isdefined( t.moving ) && t.moving ) )
+		return;
+	// a squadmate's hit counts wherever the host stands: do what the target's own handler does for a valid
+	// hit from the stall (killhouse_code.gsc targetDummyThink): score it ("hit") and knock it down
+	t notify( "hit" );
+	t thread [[ level.coop_fn_target_down ]]();
+}
+
+timed_hook()
+{
+	if ( !maps\_coop::in_coop() || level.coop.ishost )
+		return false;
+	level thread count_shared_hits();
+	return true;
+}
+
+count_shared_hits()
+{
+	level endon( "times_up" );
+	for ( ;; )
+	{
+		level waittill( "coop_target_hit" );
+		level.num_hit++;
+	}
 }

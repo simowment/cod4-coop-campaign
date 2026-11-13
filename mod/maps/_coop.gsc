@@ -19,7 +19,7 @@ preinit()
 {
 	level.coop = spawnstruct();
 	c = level.coop;
-	c.version = "0.2.6";
+	c.version = "0.2.7";
 	c.slot = openfile( "coop" );
 	if ( !isdefined( c.slot ) )
 		c.slot = -1; // no native proxy (or unsupported exe): plain single player
@@ -216,6 +216,29 @@ test_command()
 		}
 		else
 			log( "test kill: no axis with an id (" + ai.size + " axis alive)" );
+	}
+	else if ( v == "targets" || v == "targetstate" || v == "hittarget" )
+	{
+		// killhouse shared range tests: raise every rifle target / log how many are up / hit one as the player
+		t = getentarray( "rifle_target_dummy", "script_noteworthy" );
+		up = 0;
+		hit = false;
+		for ( i = 0; i < t.size; i++ )
+		{
+			if ( v == "targets" && isdefined( level.coop_fn_move_target ) )
+				t[ i ] thread [[ level.coop_fn_move_target ]]( "raise" );
+			if ( isdefined( t[ i ].raised ) && t[ i ].raised )
+			{
+				up++;
+				if ( v == "hittarget" && !hit )
+				{
+					hit = true;
+					log( "test hit target " + t[ i ] getentnum() );
+					t[ i ] notify( "damage", 100, level.player, ( 0, 0, 1 ), t[ i ].origin, "MOD_RIFLE_BULLET" );
+				}
+			}
+		}
+		log( "targets " + v + ": " + up + " of " + t.size + " raised" );
 	}
 	else if ( v == "botdemo" )
 		level.coop.bot_demo = true;

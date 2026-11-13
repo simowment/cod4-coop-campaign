@@ -19,6 +19,7 @@ LEVELS = ['killhouse', 'cargoship', 'coup', 'blackout', 'armada', 'bog_a', 'hunt
 
 # Extra level functions that a level's coop module calls (they only exist in that level's fastfile).
 LEVEL_EXTRA_EXPORTS = {
+    'killhouse': [('target_down', 'maps\\killhouse_code::target_down'), ('move_target', 'maps\\killhouse_code::moveTargetDummy')],
     'bog_a': [('abrams_gets_drawing', 'maps\\bog_a_backhalf::abrams_gets_drawing')],
     'village_assault': [('do_alasad', 'maps\\village_assault_code::do_alasad')],
     'village_defend': [('tavern_storming_delay', '::tavern_storming_delay')],
@@ -30,7 +31,23 @@ LEVEL_PATCHES = [export_fn('maps/%s.gsc' % lv, lv,
                            [('level_main', 'maps\\_coop_lvl_%s::main' % lv)] + LEVEL_EXTRA_EXPORTS.get(lv, []))
                  for lv in LEVELS]
 
+# killhouse: shared rifle range (maps/_coop_lvl_killhouse.gsc). The host's targets drive everyone's.
+for _p in LEVEL_PATCHES:
+    if _p['file'] == 'maps/killhouse.gsc':
+        _p['edits'].append((r'^timedTargets\(\)\r?\n\{\r?\n\tlevel endon \("times_up"\);\r?\n', 'after',
+                            '\tif ( isdefined( level.coop_timed_hook ) && [[ level.coop_timed_hook ]]() )' + NL + '\t\treturn;' + NL))
+
 PATCHES = LEVEL_PATCHES + [
+    {
+        'file': 'maps/killhouse_code.gsc',
+        'zones': ('killhouse',),
+        'edits': [
+            (r'^moveTargetDummy\( command \)\r?\n\{\r?\n', 'after',
+             '\tif ( isdefined( level.coop_target_hook ) && !( self [[ level.coop_target_hook ]]( command ) ) )' + NL + '\t\treturn;' + NL),
+            (r'^target_down\(\)\r?\n\{\r?\n', 'after',
+             '\tif ( isdefined( level.coop_target_hook ) && !( self [[ level.coop_target_hook ]]( "down" ) ) )' + NL + '\t\treturn;' + NL),
+        ],
+    },
     {
         'file': 'maps/_load.gsc',
         'edits': [
