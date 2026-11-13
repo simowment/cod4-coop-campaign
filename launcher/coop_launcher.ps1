@@ -73,6 +73,25 @@ function New-ProbeSocket {
     return $u
 }
 
+# Launcher lobby, on the game port before the game runs (types: 6 discover, 7 info, 8 join, 9 state, 10 start)
+function Send-Packet([System.Net.Sockets.UdpClient]$u, [System.Net.IPEndPoint]$ep, [int]$type, [string]$payload) {
+    $body = [System.Text.Encoding]::UTF8.GetBytes($payload)
+    $pkt = New-Object byte[] (12 + $body.Length)
+    $pkt[0] = 0x43; $pkt[1] = 0x34; $pkt[2] = 1; $pkt[3] = $type
+    [Array]::Copy($body, 0, $pkt, 12, $body.Length)
+    try { [void]$u.Send($pkt, $pkt.Length, $ep) } catch {}
+}
+function Receive-Packets([System.Net.Sockets.UdpClient]$u) {
+    $out = @()
+    while ($u.Available -gt 0) {
+        $from = New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Any, 0)
+        try { $data = $u.Receive([ref]$from) } catch { continue }
+        if ($data.Length -lt 12 -or $data[0] -ne 0x43 -or $data[1] -ne 0x34) { continue }
+        $out += [pscustomobject]@{ type = [int]$data[3]; from = $from; text = [System.Text.Encoding]::UTF8.GetString($data, 12, $data.Length - 12) }
+    }
+    return $out
+}
+
 function Send-Probe([System.Net.Sockets.UdpClient]$u, [System.Net.IPEndPoint]$ep) {
     # 12-byte coop header: magic 'C4' (0x3443 LE), ver 1, type 6 (DISCOVER), rest zero
     $pkt = [byte[]](0x43, 0x34, 1, 6, 0, 0, 0, 0, 0, 0, 0, 0)
@@ -96,12 +115,27 @@ function Read-Infos([System.Net.Sockets.UdpClient]$u, [int]$ms) {
     return @($found.Values)
 }
 
+# Tailscale peers that are online (the tailnet is not reached by a LAN broadcast)
+function Get-TailscalePeers {
+    $ts = Get-Command tailscale -ErrorAction SilentlyContinue
+    $exe = if ($ts) { $ts.Source } elseif (Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe") { "$env:ProgramFiles\Tailscale\tailscale.exe" } else { $null }
+    if (-not $exe) { return @() }
+    try {
+        $st = (& $exe status --json 2>$null) -join "`n" | ConvertFrom-Json
+        $ips = @()
+        if ($st.Peer) { foreach ($pp in $st.Peer.PSObject.Properties) { $peer = $pp.Value
+            if ($peer.Online) { $ip = @($peer.TailscaleIPs | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' })[0]; if ($ip) { $ips += $ip } } } }
+        return $ips
+    } catch { return @() }
+}
+
 function Find-LanGames {
     $u = New-ProbeSocket
     $u.EnableBroadcast = $true
     try {
         Send-Probe $u (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Broadcast, $Port))
         Send-Probe $u (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Loopback, $Port))
+        foreach ($ip in (Get-TailscalePeers)) { Send-Probe $u (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse($ip), $Port)) }
         return Read-Infos $u 1200
     } finally { $u.Close() }
 }
@@ -118,6 +152,7 @@ function Probe-Host([string]$ip, [int]$port) {
 
 # UPnP: ask the router to forward UDP $Port to this PC. Returns the public IP, or $null.
 function Open-RouterPort([string]$lanIp) {
+    if ($env:COOP_NO_UPNP) { return $null }   # tests
     try {
         $nat = New-Object -ComObject HNetCfg.NATUPnP
         $maps = $nat.StaticPortMappingCollection
@@ -335,6 +370,7 @@ function Get-WindowFix {
 }
 
 function Start-Game([string]$extra) {
+    if ($env:COOP_NO_GAME) { Add-Content -Path $env:COOP_NO_GAME -Value "GAME $extra"; return $null }   # tests
     $name = $settings.name -replace '[|~"]', ''
     $skinArgs = ""
     if ($settings.skin) { $skinArgs += " +set coop_myskin $($settings.skin)" }
@@ -377,23 +413,24 @@ $tabJoin = New-Object System.Windows.Forms.TabPage; $tabJoin.Text = "Join a frie
 $tabSkins = New-Object System.Windows.Forms.TabPage; $tabSkins.Text = "Skins"
 $tabs.TabPages.AddRange(@($tabHost, $tabJoin, $tabSkins)); $form.Controls.Add($tabs)
 
-# --- host tab
+# --- host tab: open a lobby, share a code, friends join in the launcher, then launch everyone together
 $lblMis = New-Object System.Windows.Forms.Label; $lblMis.Text = "Mission"; $lblMis.Location = "12,16"; $lblMis.AutoSize = $true
 $cmbMis = New-Object System.Windows.Forms.ComboBox; $cmbMis.DropDownStyle = "DropDownList"; $cmbMis.Location = "100,13"; $cmbMis.Width = 360
 foreach ($k in $Missions.Keys) { [void]$cmbMis.Items.Add($k); if ($Missions[$k] -eq $settings.mission) { $cmbMis.SelectedItem = $k } }
 if (-not $cmbMis.SelectedItem) { $cmbMis.SelectedIndex = 1 }
-$lblSq = New-Object System.Windows.Forms.Label; $lblSq.Text = "Wait for"; $lblSq.Location = "12,52"; $lblSq.AutoSize = $true
-$numSq = New-Object System.Windows.Forms.NumericUpDown; $numSq.Location = "100,49"; $numSq.Width = 50; $numSq.Minimum = 1; $numSq.Maximum = 4; $numSq.Value = [int]$settings.squad
-$lblSq2 = New-Object System.Windows.Forms.Label; $lblSq2.Text = "players before the mission starts"; $lblSq2.Location = "156,52"; $lblSq2.AutoSize = $true
-$lblBots = New-Object System.Windows.Forms.Label; $lblBots.Text = "Bots"; $lblBots.Location = "12,86"; $lblBots.AutoSize = $true
-$numBots = New-Object System.Windows.Forms.NumericUpDown; $numBots.Location = "100,83"; $numBots.Width = 50; $numBots.Minimum = 0; $numBots.Maximum = 3; $numBots.Value = [int]$settings.bots
-$lblBots2 = New-Object System.Windows.Forms.Label; $lblBots2.Text = "AI squadmates, wearing"; $lblBots2.Location = "156,86"; $lblBots2.AutoSize = $true
-$cmbBotSkin = New-SkinBox $settings.botskin "318,83" 142
-$btnHost = New-Object System.Windows.Forms.Button; $btnHost.Text = "Start hosting"; $btnHost.Location = "100,116"; $btnHost.Size = "160,34"
-$txtCodes = New-Object System.Windows.Forms.TextBox; $txtCodes.Multiline = $true; $txtCodes.ReadOnly = $true; $txtCodes.Location = "12,158"; $txtCodes.Size = "450,116"
-$txtCodes.Font = New-Object System.Drawing.Font("Consolas", 10); $txtCodes.Text = "Your join code appears here once you start hosting."
-$btnCopy = New-Object System.Windows.Forms.Button; $btnCopy.Text = "Copy join code"; $btnCopy.Location = "12,282"; $btnCopy.Size = "160,32"; $btnCopy.Enabled = $false
-$tabHost.Controls.AddRange(@($lblMis, $cmbMis, $lblSq, $numSq, $lblSq2, $lblBots, $numBots, $lblBots2, $cmbBotSkin, $btnHost, $txtCodes, $btnCopy))
+$lblBots = New-Object System.Windows.Forms.Label; $lblBots.Text = "Bots"; $lblBots.Location = "12,50"; $lblBots.AutoSize = $true
+$numBots = New-Object System.Windows.Forms.NumericUpDown; $numBots.Location = "100,47"; $numBots.Width = 50; $numBots.Minimum = 0; $numBots.Maximum = 3; $numBots.Value = [int]$settings.bots
+$lblBots2 = New-Object System.Windows.Forms.Label; $lblBots2.Text = "AI squadmates, wearing"; $lblBots2.Location = "156,50"; $lblBots2.AutoSize = $true
+$cmbBotSkin = New-SkinBox $settings.botskin "318,47" 142
+$btnHost = New-Object System.Windows.Forms.Button; $btnHost.Text = "Open lobby"; $btnHost.Location = "100,80"; $btnHost.Size = "150,32"
+$btnLaunch = New-Object System.Windows.Forms.Button; $btnLaunch.Text = "Launch game"; $btnLaunch.Location = "260,80"; $btnLaunch.Size = "150,32"; $btnLaunch.Enabled = $false
+$txtCodes = New-Object System.Windows.Forms.TextBox; $txtCodes.Multiline = $true; $txtCodes.ReadOnly = $true; $txtCodes.Location = "12,120"; $txtCodes.Size = "450,84"
+$txtCodes.Font = New-Object System.Drawing.Font("Consolas", 9); $txtCodes.Text = "Open a lobby: your join codes appear here, friends join, then you launch everyone together."
+$btnCopy = New-Object System.Windows.Forms.Button; $btnCopy.Text = "Copy join code"; $btnCopy.Location = "12,208"; $btnCopy.Size = "220,28"; $btnCopy.Enabled = $false
+$btnCopy2 = New-Object System.Windows.Forms.Button; $btnCopy2.Text = "Copy other code"; $btnCopy2.Location = "242,208"; $btnCopy2.Size = "220,28"; $btnCopy2.Enabled = $false
+$lblLobby = New-Object System.Windows.Forms.Label; $lblLobby.Text = "In the lobby"; $lblLobby.Location = "12,242"; $lblLobby.AutoSize = $true
+$lstLobby = New-Object System.Windows.Forms.ListBox; $lstLobby.Location = "12,260"; $lstLobby.Size = "450,64"
+$tabHost.Controls.AddRange(@($lblMis, $cmbMis, $lblBots, $numBots, $lblBots2, $cmbBotSkin, $btnHost, $btnLaunch, $txtCodes, $btnCopy, $btnCopy2, $lblLobby, $lstLobby))
 
 # --- join tab
 $lblCode = New-Object System.Windows.Forms.Label; $lblCode.Text = "Join code"; $lblCode.Location = "12,16"; $lblCode.AutoSize = $true
@@ -410,40 +447,140 @@ $script:hostingProc = $null
 $script:mainCode = ""
 $script:lanGames = @()
 
+$script:lobby = $null        # host lobby: socket + members (key "ip:port" -> name, endpoint, last seen)
+$script:codes = @()           # @{ label; code } in order of preference
 $btnHost.Add_Click({
-    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
-    $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.squad = [int]$numSq.Value; $settings.bots = [int]$numBots.Value
-    $settings.skin = Get-SkinChoice $cmbSkin; $settings.botskin = Get-SkinChoice $cmbBotSkin; Save-Settings
-    $btnHost.Enabled = $false; $txtCodes.Text = "Opening the game port on your router..."; $form.Refresh()
-    $addr = Get-LocalAddresses
-    $lines = @()
-    $public = $null
-    if ($addr.lan) { $public = Open-RouterPort $addr.lan }
-    if ($public) {
-        $script:mainCode = Encode-JoinCode $public $Port
-        $lines += "Internet join code:  $($script:mainCode)"
-        $lines += "  (send this to your friends; your router opened UDP $Port)"
+    try {
+        if ($script:lobby) { Close-Lobby; return }
+        $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
+        $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.bots = [int]$numBots.Value
+        $settings.skin = Get-SkinChoice $cmbSkin; $settings.botskin = Get-SkinChoice $cmbBotSkin; Save-Settings
+        $btnHost.Enabled = $false; $txtCodes.Text = "Opening the game port on your router..."; $form.Refresh()
+        $addr = Get-LocalAddresses
+        $public = $null
+        if ($addr.lan) { $public = Open-RouterPort $addr.lan }
+        # Tailscale/VPN first: it works through any router; then the internet code (UPnP), then same network
+        $script:codes = @()
+        if ($addr.vpn) { $script:codes += @{ label = "$($addr.vpnName)"; code = (Encode-JoinCode $addr.vpn $Port) } }
+        if ($public) { $script:codes += @{ label = "internet"; code = (Encode-JoinCode $public $Port) } }
+        if ($addr.lan) { $script:codes += @{ label = "same network"; code = (Encode-JoinCode $addr.lan $Port) } }
+        $lines = @()
+        foreach ($c in $script:codes) { $lines += ("{0,-14} {1}" -f ($c.label + ":"), $c.code) }
+        if (-not $public) { $lines += "(router did not open the port: use the $($addr.vpnName) code, or forward UDP $Port)" }
+        if (-not $addr.vpn) { $lines += "(no Tailscale/ZeroTier found: friends outside your network need the internet code)" }
+        $txtCodes.Text = ($lines -join "`r`n")
+        $btnCopy.Enabled = $script:codes.Count -gt 0
+        if ($script:codes.Count) { $btnCopy.Text = "Copy $($script:codes[0].label) code" }
+        $btnCopy2.Enabled = $script:codes.Count -gt 1
+        if ($script:codes.Count -gt 1) { $btnCopy2.Text = "Copy $($script:codes[1].label) code" }
+        $u = New-Object System.Net.Sockets.UdpClient $Port
+        try { [void]$u.Client.IOControl(-1744830452, [byte[]](0, 0, 0, 0), $null) } catch {}
+        $script:lobby = @{ u = $u; members = [ordered]@{} }
+        $btnHost.Text = "Close lobby"; $btnHost.Enabled = $true; $btnLaunch.Enabled = $true
+        Update-LobbyList
+    } catch {
+        $txtCodes.Text = "Could not open the lobby: $($_.Exception.Message)`r`n(Is the game already running on this PC?)"
+        $btnHost.Enabled = $true
     }
-    if ($addr.vpn) {
-        $c = Encode-JoinCode $addr.vpn $Port; if (-not $script:mainCode) { $script:mainCode = $c }
-        $lines += "VPN ($($addr.vpnName)) code:  $c"
-    }
-    if ($addr.lan) {
-        $c = Encode-JoinCode $addr.lan $Port; if (-not $script:mainCode) { $script:mainCode = $c }
-        $lines += "Same-network code:  $c   (or friends just pick you under 'Games on your network')"
-    }
-    if (-not $public) {
-        $lines += ""
-        $lines += "Your router did not open the port automatically (UPnP off or unsupported)."
-        $lines += "Internet play then needs a VPN like Tailscale, or a manual UDP $Port forward."
-    }
-    $txtCodes.Text = ($lines -join "`r`n")
-    $btnCopy.Enabled = [bool]$script:mainCode
+})
+function Update-LobbyList {
+    $lstLobby.Items.Clear()
+    [void]$lstLobby.Items.Add("$($settings.name) (you, host)")
+    for ($b = 1; $b -le [int]$numBots.Value; $b++) { [void]$lstLobby.Items.Add("Bot $b") }
+    if ($script:lobby) { foreach ($m in $script:lobby.members.Values) { [void]$lstLobby.Items.Add($m.name) } }
+}
+function Close-Lobby {
+    if ($script:lobby) { try { $script:lobby.u.Close() } catch {} }
+    $script:lobby = $null
+    Close-RouterPort
+    $btnHost.Text = "Open lobby"; $btnLaunch.Enabled = $false; $btnCopy.Enabled = $false; $btnCopy2.Enabled = $false
+    $lstLobby.Items.Clear(); $txtCodes.Text = "Lobby closed."
+}
+$lobbyTimer = New-Object System.Windows.Forms.Timer; $lobbyTimer.Interval = 150
+$lobbyTimer.Add_Tick({
+    try {
+        if ($script:lobby) {
+            $L = $script:lobby
+            $now = Get-Date
+            foreach ($pk in (Receive-Packets $L.u)) {
+                $key = $pk.from.ToString()
+                if ($pk.type -eq 6) {
+                    Send-Packet $L.u $pk.from 7 ("{0}|lobby|{1}|4" -f $settings.name, (1 + $L.members.Count + [int]$numBots.Value))
+                } elseif ($pk.type -eq 8) {
+                    $nm = ($pk.text -replace '[|,~"]', '').Trim(); if (-not $nm) { $nm = "Player" }
+                    $new = -not $L.members.Contains($key)
+                    $L.members[$key] = @{ name = $nm; ep = $pk.from; seen = $now }
+                    $nb = [int]$numBots.Value
+                    $names = @($settings.name) + @(if ($nb -gt 0) { 1..$nb | ForEach-Object { "Bot $_" } }) + @($L.members.Values | ForEach-Object { $_.name })
+                    Send-Packet $L.u $pk.from 9 ("{0}|{1}" -f $cmbMis.SelectedItem, ($names -join ","))
+                    if ($new) { Update-LobbyList }
+                }
+            }
+            $gone = @($L.members.Keys | Where-Object { ($now - $L.members[$_].seen).TotalSeconds -gt 6 })
+            foreach ($k in $gone) { $L.members.Remove($k) }
+            if ($gone.Count) { Update-LobbyList }
+        }
+        if ($script:joining) { Step-JoinLobby }
+    } catch {}
+})
+$lobbyTimer.Start()
+$numBots.Add_ValueChanged({ if ($script:lobby) { Update-LobbyList } })
+$btnLaunch.Add_Click({
+    if (-not $script:lobby) { return }
+    $L = $script:lobby
+    $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.bots = [int]$numBots.Value
+    $settings.botskin = Get-SkinChoice $cmbBotSkin; Save-Settings
+    # tell every friend in the lobby to start their game, then free the port for ours
+    for ($r = 0; $r -lt 3; $r++) { foreach ($m in $L.members.Values) { Send-Packet $L.u $m.ep 10 "$Port" }; Start-Sleep -Milliseconds 60 }
+    $wait = 1 + $L.members.Count + $settings.bots
+    try { $L.u.Close() } catch {}
+    $script:lobby = $null
+    $btnLaunch.Enabled = $false; $btnHost.Enabled = $false; $btnHost.Text = "Open lobby"
+    $txtCodes.Text = "Game starting for $wait players (you, $($settings.bots) bots, $($L.members.Count) friends).`r`nFriends can still join with the same code while you play."
     $botArg = ""; if ($settings.bots -gt 0) { $botArg = "+set coop_bot $($settings.bots)" }
-    $script:hostingProc = Start-Game "+set coop_host 1 +set coop_wait $($settings.squad) $botArg +set coop_startmap $($settings.mission)"
+    $script:hostingProc = Start-Game "+set coop_host 1 +set coop_wait $wait $botArg +set coop_startmap $($settings.mission)"
 })
 
-$btnCopy.Add_Click({ if ($script:mainCode) { [System.Windows.Forms.Clipboard]::SetText($script:mainCode); $btnCopy.Text = "Copied!" } })
+$btnCopy.Add_Click({ if ($script:codes.Count) { [System.Windows.Forms.Clipboard]::SetText($script:codes[0].code); $btnCopy.Text = "Copied!" } })
+$btnCopy2.Add_Click({ if ($script:codes.Count -gt 1) { [System.Windows.Forms.Clipboard]::SetText($script:codes[1].code); $btnCopy2.Text = "Copied!" } })
+
+# host still in the launcher lobby: wait there (the timer keeps checking in) until they launch; else join the game
+$script:joining = $null
+function Join-HostOrLobby([string]$ip, [int]$port, $info) {
+    if ($info.map -ne "lobby") {
+        $lblJoinStatus.Text = "Joining $($info.host) ($($info.map), $($info.players) players)..."; $form.Refresh()
+        Join-Address $ip $port; return
+    }
+    if ($script:joining) { try { $script:joining.u.Close() } catch {} }
+    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }; Save-Settings
+    $script:joining = @{ u = (New-ProbeSocket); ep = (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse($ip), $port)); ip = $ip; port = $port
+                         host = $info.host; lastSend = [datetime]::MinValue; lastHeard = (Get-Date) }
+    $lblJoinStatus.Text = "In $($info.host)'s lobby. Waiting for them to launch the game..."
+}
+function Step-JoinLobby {
+    $J = $script:joining
+    $now = Get-Date
+    if (($now - $J.lastSend).TotalMilliseconds -gt 1000) { Send-Packet $J.u $J.ep 8 $settings.name; $J.lastSend = $now }
+    foreach ($pk in (Receive-Packets $J.u)) {
+        if ($pk.type -eq 9) {
+            $J.lastHeard = $now
+            $f = $pk.text.Split('|')
+            $lblJoinStatus.Text = "In $($J.host)'s lobby ($($f[0])): $($f[1] -replace ',', ', ').`r`nWaiting for $($J.host) to launch the game..."
+        } elseif ($pk.type -eq 10) {
+            try { $J.u.Close() } catch {}
+            $script:joining = $null
+            $lblJoinStatus.Text = "$($J.host) launched the game: starting yours..."; $form.Refresh()
+            Start-Sleep -Milliseconds 1500   # let the host's game take the port before we connect
+            Join-Address $J.ip $J.port
+            return
+        }
+    }
+    if (($now - $J.lastHeard).TotalSeconds -gt 10) {
+        try { $J.u.Close() } catch {}
+        $script:joining = $null
+        $lblJoinStatus.Text = "Lost the lobby ($($J.host) closed it?). Try joining again."
+    }
+}
 
 function Join-Address([string]$ip, [int]$port) {
     $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
@@ -459,9 +596,8 @@ $btnJoin.Add_Click({
         $lblJoinStatus.Text = "Looking for the host..."; $form.Refresh()
         $r = Probe-Host $d.ip $d.port
         if (-not $r) { $lblJoinStatus.Text = "No answer from that host. Is their game running, and is the code right?"; return }
-        $settings.lastCode = $txtCode.Text.Trim()
-        $lblJoinStatus.Text = "Joining $($r.host) ($($r.map), $($r.players) players)..."; $form.Refresh()
-        Join-Address $d.ip $d.port
+        $settings.lastCode = $txtCode.Text.Trim(); Save-Settings
+        Join-HostOrLobby $d.ip $d.port $r
     } catch { $lblJoinStatus.Text = "Something went wrong: $($_.Exception.Message)" }
 })
 
@@ -471,7 +607,11 @@ $btnFind.Add_Click({
         $script:lanGames = @(Find-LanGames)
         $lstLan.Items.Clear()
         if (-not $script:lanGames.Count) { [void]$lstLan.Items.Add("No games found on this network.") }
-        foreach ($g in $script:lanGames) { [void]$lstLan.Items.Add("$($g.host)  -  $($g.map)  -  $($g.players) players  ($($g.ip))") }
+        foreach ($g in $script:lanGames) {
+            $where = if ($g.map -eq "lobby") { "in the lobby" } else { $g.map }
+            $via = if ($g.ip -match '^100\.') { "Tailscale " } else { "" }
+            [void]$lstLan.Items.Add("$($g.host)  -  $where  -  $($g.players) players  ($via$($g.ip))")
+        }
     } catch { $lblJoinStatus.Text = "Something went wrong: $($_.Exception.Message)" }
 })
 
@@ -479,7 +619,7 @@ $btnJoinLan.Add_Click({
     try {
         $i = $lstLan.SelectedIndex
         if ($i -lt 0 -or $i -ge $script:lanGames.Count) { $lblJoinStatus.Text = "Pick a game from the list first."; return }
-        $g = $script:lanGames[$i]; Join-Address $g.ip $g.port
+        $g = $script:lanGames[$i]; Join-HostOrLobby $g.ip $g.port $g
     } catch { $lblJoinStatus.Text = "Something went wrong: $($_.Exception.Message)" }
 })
 
@@ -563,7 +703,11 @@ $tabs.Add_SelectedIndexChanged({ if ($tabs.SelectedTab -eq $tabJoin -and $lstLan
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 2000
 $timer.Add_Tick({ if ($script:hostingProc -and $script:hostingProc.HasExited) { Close-RouterPort; $script:hostingProc = $null; $btnHost.Enabled = $true; $txtCodes.Text = "The game closed. Hosting stopped." } })
 $timer.Start()
-$form.Add_FormClosing({ if ($script:hostingProc) { Close-RouterPort } })
+$form.Add_FormClosing({
+    if ($script:lobby) { try { $script:lobby.u.Close() } catch {}; Close-RouterPort }
+    elseif ($script:hostingProc) { Close-RouterPort }
+    if ($script:joining) { try { $script:joining.u.Close() } catch {} }
+})
 
 # first-start setup runs in the background; the window stays responsive and shows the progress
 $setupTimer = New-Object System.Windows.Forms.Timer; $setupTimer.Interval = 250
@@ -581,6 +725,35 @@ $form.Add_Shown({
         catch { $txtCodes.Text = "Setup failed: $($_.Exception.Message)"; $btnHost.Enabled = $true; $btnJoin.Enabled = $true; $btnJoinLan.Enabled = $true }
     }
 })
+
+# test hooks: drive the lobby headless (COOP_TEST_LOBBY=host|join:<code>, results to COOP_NO_GAME file)
+if ($env:COOP_TEST_LOBBY) {
+    $click = { param($b) $b.GetType().GetMethod("OnClick", [Reflection.BindingFlags]"NonPublic,Instance").Invoke($b, @([EventArgs]::Empty)) }
+    $log = { param($t) Add-Content -Path $env:COOP_NO_GAME -Value $t }
+    if ($env:COOP_TEST_LOBBY -eq "host") {
+        & $click $btnHost
+        & $log ("CODES " + ($txtCodes.Text -replace "`r`n", " / "))
+        $end = (Get-Date).AddSeconds(40); $launched = $false
+        while ((Get-Date) -lt $end) {
+            [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 40
+            if (-not $launched -and $script:lobby -and $script:lobby.members.Count -ge 1) {
+                & $log ("LOBBY " + (@($lstLobby.Items) -join ", ")); Start-Sleep -Milliseconds 2500
+                for ($k = 0; $k -lt 20; $k++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 40 }
+                & $click $btnLaunch; $launched = $true; & $log ("HOST " + ($txtCodes.Text -replace "`r`n", " / ")); break
+            }
+        }
+    } else {
+        $txtCode.Text = $env:COOP_TEST_LOBBY.Substring(5)
+        & $click $btnJoin
+        $end = (Get-Date).AddSeconds(40); $last = ""
+        while ((Get-Date) -lt $end) {
+            [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 40
+            if ($lblJoinStatus.Text -ne $last) { $last = $lblJoinStatus.Text; & $log ("JOIN " + ($last -replace "`r`n", " / ")) }
+            if ((Get-Content $env:COOP_NO_GAME -Raw) -match "GAME \+set coop_connect") { break }
+        }
+    }
+    exit
+}
 
 # test hook: render a tab to a PNG without showing the window (COOP_LAUNCHER_SNAPSHOT=<png>[|tab index])
 if ($env:COOP_LAUNCHER_SNAPSHOT) {

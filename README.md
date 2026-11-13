@@ -15,18 +15,19 @@ checkpoints and failures stay in sync.
 1. Download `cod4-coop-<version>.zip` from the [latest release](../../releases/latest) and **unzip it into your game folder** (the one
    with `iw3sp.exe`). Double-click **`CoD4 Coop.bat`**. On first start it adds the coop hooks to the game's scripts, reading
    them from your own game files. That takes a few seconds, once.
-2. **Host:** double-click `CoD4 Coop.bat`, enter your name, then **Host a game**. Pick a mission and how
-   many players to wait for, and click **Start hosting**. Copy the **join code** (e.g. `2H092-T0W9A`) and send
-   it to your friends.
-3. **Friends:** double-click `CoD4 Coop.bat`, then **Join a friend**, paste the code and click **Join**.
-   On the same network you don't need a code: the host shows up under *Games on your network*.
-4. Each friend's game loads the host's mission by itself. The mission waits on *"Waiting for your squad to
-   load..."* until everyone is in, and then everyone starts on the same frame.
+2. **Host:** on **Host a game**, pick a mission (and bots if you like) and click **Open lobby**. Copy a **join
+   code** (e.g. `2H092-T0W9A`) and send it to your friends. The Tailscale/ZeroTier code comes first when you
+   have one, because it works through any router.
+3. **Friends:** on **Join a friend**, paste the code and click **Join**. Without a code, pick the host under
+   *Games on your network*, which also lists hosts on your Tailscale network. Their launcher waits in your lobby.
+4. When everyone shows up under *In the lobby*, click **Launch game**. All games start together, and the mission
+   waits on *"Waiting for your squad to load..."* until everyone is in. Friends can still join later with the
+   same code.
 
 ### Playing with bots
 
-Set **Bots** (0–3) on the host tab to add AI squadmates. They join the lobby right away and count toward
-*Wait for*, so **Wait for 2 + Bots 1** starts at once, and friends can still join the free slots.
+Set **Bots** (0–3) on the host tab to add AI squadmates. They show up in the lobby, and friends can still
+join the free slots.
 
 A bot runs inside the host's game and looks like any other squadmate: animated soldier, name tag, squad
 HUD. It follows you along the path you walked, matches your stance, shoots enemies it can see (real
