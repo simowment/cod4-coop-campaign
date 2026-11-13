@@ -15,7 +15,9 @@ checkpoints and failures stay in sync.
 1. Download `cod4-coop-<version>.zip` from the [latest release](../../releases/latest) and **unzip it into your game folder** (the one
    with `iw3sp.exe`). Double-click **`CoD4 Coop.bat`**. On first start it adds the coop hooks to the game's scripts, reading
    them from your own game files. That takes a few seconds, once.
-2. **Host:** on **Host a game**, pick a mission (and bots if you like) and click **Open lobby**. Copy a **join
+2. **Host:** on **Host a game**, pick a mission (*Prologue 1 – F.N.G.* plays the whole campaign from the start,
+   because missions chain by themselves) and bots if you like, then click **Open lobby**. The first time, Windows may ask to let PowerShell use the
+   network: allow it, because the lobby runs in the launcher. Copy a **join
    code** (e.g. `2H092-T0W9A`) and send it to your friends. The Tailscale/ZeroTier code comes first when you
    have one, because it works through any router.
 3. **Friends:** on **Join a friend**, paste the code and click **Join**. Without a code, pick the host under
@@ -39,7 +41,8 @@ events and never holds up a sync point; it doesn't use grenades or launchers.
 
 Pick a **Skin** next to your name (and a skin for your bots on the host tab). Your game announces it, and
 everyone who has that skin in their skin pack sees you wearing it. Anyone without it sees the normal soldier.
-Everyone should install the same skin pack.
+When friends join your lobby (or your running game), their launcher downloads your skin pack
+automatically, so everyone has the same skins.
 
 **Adding skins from the launcher:** open the **Skins** tab, click **Add character…** and pick a GLB, glTF, DAE,
 OBJ or FBX file (FBX needs Blender). Models without a skeleton are **rigged automatically**: they should stand

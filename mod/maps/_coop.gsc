@@ -19,7 +19,7 @@ preinit()
 {
 	level.coop = spawnstruct();
 	c = level.coop;
-	c.version = "0.2.4";
+	c.version = "0.2.5";
 	c.slot = openfile( "coop" );
 	if ( !isdefined( c.slot ) )
 		c.slot = -1; // no native proxy (or unsupported exe): plain single player
