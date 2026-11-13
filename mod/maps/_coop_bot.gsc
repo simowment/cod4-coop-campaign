@@ -498,6 +498,7 @@ bot_demo( slot, b )
 	face = a[ 1 ] + 180; // looking at the camera
 	// name, stance, flags, speed, mode (still / across = sideways facing travel / strafe = sideways facing camera / away = backing away facing camera)
 	ph = [];
+	ph[ ph.size ] = "melee|0|64|0|still";
 	ph[ ph.size ] = "turn_idle|0|0|0|turn";
 	ph[ ph.size ] = "walk_circle|0|0|walk_f|circle";
 	ph[ ph.size ] = "run_circle|0|0|run_f|circle";
@@ -592,7 +593,7 @@ bot_demo( slot, b )
 					steps[ steps.size ] = distance( ( body[ 0 ], body[ 1 ], 0 ), ( last[ 0 ], last[ 1 ], 0 ) );
 				last = body;
 			}
-			if ( k == 25 || k == 45 || ( ( mode == "turn" || mode == "circle" ) && k >= 20 && k < 32 ) )
+			if ( k == 25 || k == 45 || ( ( mode == "turn" || mode == "circle" || t[ 0 ] == "melee" ) && k >= 2 && k < 14 ) )
 				openfile( "coop", "shot", t[ 0 ] + "_" + ( 100 + k ) ); // test mode only: the proxy saves this frame
 			wait 0.05;
 		}

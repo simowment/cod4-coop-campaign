@@ -253,7 +253,7 @@ update_puppet( slot )
 	// debounce: a new anim must be asked for on 2 updates in a row (a one-frame gait flicker would snap
 	// the pose twice); the first anim and downed/prone changes apply at once
 	want = choose_anim( flags, delta, yaw );
-	if ( isdefined( self.coop_anim ) && want != self.coop_anim && want != "downed" && self.coop_anim != "downed" )
+	if ( isdefined( self.coop_anim ) && self.coop_anim != "" && want != self.coop_anim && want != "downed" && self.coop_anim != "downed" )
 	{
 		if ( !isdefined( self.coop_want ) || self.coop_want != want )
 		{
@@ -263,6 +263,22 @@ update_puppet( slot )
 	}
 	else
 		self.coop_want = undefined;
+	// melee (flag 64): one swing over whatever the body is doing, then back to the gait anim
+	if ( ( flags & 64 ) != 0 && !isdefined( self.coop_melee_until ) )
+	{
+		self setanimknoball( %melee_1, %body, 1, 0.1, 1.3 );
+		self.coop_melee_until = gettime() + int( getanimlength( %melee_1 ) / 1.3 * 1000 );
+	}
+	if ( isdefined( self.coop_melee_until ) )
+	{
+		if ( gettime() < self.coop_melee_until )
+		{
+			self set_puppet_anim_move_only();
+			return;
+		}
+		self.coop_melee_until = undefined;
+		self.coop_anim = ""; // blend back into the gait anim
+	}
 	self set_puppet_anim( want );
 	self replay_shots( slot, flags, pos, pitch, yaw );
 }
@@ -612,8 +628,8 @@ set_puppet_anim( name )
 		rate = self.coop_speed / sp;
 		if ( rate < 0.6 )
 			rate = 0.6;
-		else if ( rate > 1.6 )
-			rate = 1.6;
+		else if ( rate > 1.15 )
+			rate = 1.15; // faster cycling looked hurried; a little foot slide reads better
 	}
 	pa = level.coop.puppet_anims[ name ];
 	if ( self.coop_anim != name )
@@ -687,4 +703,13 @@ announce_skin()
 		maps\_coop::send( "Z|" + c.my_skin );
 	else
 		maps\_coop::send( "Z|-" );
+}
+
+// during a one-off anim (melee): keep gliding to the network pose without touching the anims
+set_puppet_anim_move_only()
+{
+	if ( !isdefined( self.coop_pos ) )
+		return;
+	self moveto( self.coop_pos, 0.1 );
+	self rotateto( ( 0, self.coop_yaw, 0 ), 0.1 );
 }

@@ -19,7 +19,7 @@ preinit()
 {
 	level.coop = spawnstruct();
 	c = level.coop;
-	c.version = "0.2.5";
+	c.version = "0.2.6";
 	c.slot = openfile( "coop" );
 	if ( !isdefined( c.slot ) )
 		c.slot = -1; // no native proxy (or unsupported exe): plain single player
@@ -344,6 +344,8 @@ send_pose()
 		flags += 8;
 	if ( level.coop.down )
 		flags += 16;
+	if ( p ismeleeing() )
+		flags += 64; // squadmates play a melee swing
 	if ( isdefined( level.coop.hidden ) || player_linked() )
 		flags += 32;
 	flags += ( level.coop.shots % 256 ) * 256;
