@@ -132,6 +132,79 @@ if ($Discover) { Find-LanGames | ForEach-Object { "$($_.host) | $($_.map) | $($_
 if ($Probe) { $d = Decode-JoinCode $Probe; $r = Probe-Host $d.ip $d.port; if ($r) { "$($r.host) | $($r.map) | $($r.players)" } else { "no answer" }; exit 0 }
 
 # ------------------------------------------------------------------------------------------------
+# first start: the coop hooks go into the stock scripts, which are read from the player's own game
+# files (no game files are shipped). coop_patches.json lists anchored edits; .patched records the
+# hash of the edit list that was applied, so a new release re-applies them.
+# ------------------------------------------------------------------------------------------------
+$CoopFFCode = @'
+using System; using System.IO; using System.IO.Compression; using System.Text;
+using System.Text.RegularExpressions; using System.Collections.Generic;
+public static class CoopFF {
+    static readonly Encoding L1 = Encoding.GetEncoding(28591);
+    static readonly Dictionary<string, Dictionary<string, string>> Cache = new Dictionary<string, Dictionary<string, string>>();
+    static readonly Regex Raw = new Regex("\xff\xff\xff\xff(.{4})\xff\xff\xff\xff([a-zA-Z0-9_/\\\\.\\-]{3,120}\\.(?:gsc|csv|cfg|txt|menu|str|vision|atr|gdt|shock|arena|sun))\x00", RegexOptions.Singleline);
+    static Dictionary<string, string> Rawfiles(string ff) {
+        Dictionary<string, string> d;
+        if (Cache.TryGetValue(ff, out d)) return d;
+        byte[] b = File.ReadAllBytes(ff);
+        if (L1.GetString(b, 0, 8) != "IWffu100") throw new Exception("not an IW3 fastfile: " + ff);
+        var ms = new MemoryStream();
+        using (var ds = new DeflateStream(new MemoryStream(b, 14, b.Length - 14), CompressionMode.Decompress)) ds.CopyTo(ms);
+        string z = L1.GetString(ms.ToArray());
+        d = new Dictionary<string, string>();
+        foreach (Match m in Raw.Matches(z)) {
+            string l = m.Groups[1].Value;
+            int len = l[0] | (l[1] << 8) | (l[2] << 16) | (l[3] << 24);
+            if (len > 0 && len < 8000000 && m.Index + m.Length + len <= z.Length)
+                d[m.Groups[2].Value.Replace('\\', '/')] = z.Substring(m.Index + m.Length, len);
+        }
+        Cache[ff] = d;
+        return d;
+    }
+    public static string Find(string zoneDir, string name, string[] zones) {
+        foreach (string zn in zones) {
+            var d = Rawfiles(Path.Combine(zoneDir, zn + ".ff"));
+            string t;
+            if (d.TryGetValue(name, out t)) return t;
+        }
+        throw new Exception(name + " not found in your game files (" + string.Join(", ", zones) + ")");
+    }
+    public static string Apply(string file, string text, string anchor, string mode, string payload) {
+        var ms = Regex.Matches(text, anchor, RegexOptions.Multiline);
+        if (ms.Count != 1) throw new Exception("patch anchor for " + file + " matched " + ms.Count + " times");
+        Match m = ms[0];
+        if (mode == "after") return text.Substring(0, m.Index + m.Length) + payload + text.Substring(m.Index + m.Length);
+        if (mode == "before") return text.Substring(0, m.Index) + payload + text.Substring(m.Index);
+        if (mode == "replace") return text.Substring(0, m.Index) + payload + text.Substring(m.Index + m.Length);
+        throw new Exception("bad patch mode " + mode);
+    }
+    public static void Write(string path, string text) {
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        File.WriteAllText(path, text, L1);
+    }
+}
+'@
+function Test-CoopInstalled {
+    $json = Join-Path $GameDir "Mods\coop\coop_patches.json"
+    if (-not (Test-Path $json)) { return $true }
+    $marker = Join-Path $GameDir "Mods\coop\.patched"
+    return ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq (Get-FileHash $json -Algorithm SHA256).Hash))
+}
+function Install-CoopScripts {
+    $json = Join-Path $GameDir "Mods\coop\coop_patches.json"
+    if (-not ("CoopFF" -as [type])) { Add-Type -TypeDefinition $CoopFFCode }
+    $p = [IO.File]::ReadAllText($json) | ConvertFrom-Json
+    $zoneDir = Join-Path $GameDir "zone\english"
+    foreach ($e in $p.patches) {
+        $t = [CoopFF]::Find($zoneDir, $e.file, [string[]]$e.zones)
+        foreach ($ed in $e.edits) { $t = [CoopFF]::Apply($e.file, $t, $ed.anchor, $ed.mode, $ed.payload) }
+        [CoopFF]::Write((Join-Path $GameDir ("Mods\coop\" + $e.file)), $t)
+    }
+    Set-Content -Path (Join-Path $GameDir "Mods\coop\.patched") -Value (Get-FileHash $json -Algorithm SHA256).Hash -Encoding ascii
+}
+if ($env:COOP_INSTALL_ONLY) { Install-CoopScripts; "installed"; exit }
+
+# ------------------------------------------------------------------------------------------------
 # window
 # ------------------------------------------------------------------------------------------------
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -394,6 +467,17 @@ $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 2000
 $timer.Add_Tick({ if ($script:hostingProc -and $script:hostingProc.HasExited) { Close-RouterPort; $script:hostingProc = $null; $btnHost.Enabled = $true; $txtCodes.Text = "The game closed. Hosting stopped." } })
 $timer.Start()
 $form.Add_FormClosing({ if ($script:hostingProc) { Close-RouterPort } })
+
+$form.Add_Shown({
+    if (-not (Test-CoopInstalled)) {
+        $btnHost.Enabled = $false; $btnJoin.Enabled = $false; $btnJoinLan.Enabled = $false
+        $txtCodes.Text = "First start: adding the coop hooks to the game scripts from your own game files (under a minute)..."
+        $form.Refresh()
+        try { Install-CoopScripts; $txtCodes.Text = "Ready. Pick a mission and start hosting, or join a friend." }
+        catch { $txtCodes.Text = "Setup failed: $($_.Exception.Message)`r`nIs this the CoD4 1.0 game folder (iw3sp.exe, zone\english)?" }
+        $btnHost.Enabled = $true; $btnJoin.Enabled = $true; $btnJoinLan.Enabled = $true
+    }
+})
 
 # test hook: render a tab to a PNG without showing the window (COOP_LAUNCHER_SNAPSHOT=<png>[|tab index])
 if ($env:COOP_LAUNCHER_SNAPSHOT) {

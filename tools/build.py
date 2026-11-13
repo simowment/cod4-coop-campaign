@@ -45,15 +45,27 @@ def main():
     ap.add_argument('--game', default=DEFAULT_GAME)
     ap.add_argument('--mod', default='coop')
     ap.add_argument('--also', default='', help='comma list of extra mod folder names to mirror into (tests)')
+    ap.add_argument('--stage', help='write a release folder (no game needed): the launcher patches the stock scripts itself')
     a = ap.parse_args()
-    exe = os.path.join(a.game, 'iw3sp.exe')
-    if not os.path.isfile(exe):
-        raise SystemExit('iw3sp.exe not found in ' + a.game)
+    if a.stage:
+        a.game = os.path.abspath(a.stage)
+        os.makedirs(a.game, exist_ok=True)
+    else:
+        exe = os.path.join(a.game, 'iw3sp.exe')
+        if not os.path.isfile(exe):
+            raise SystemExit('iw3sp.exe not found in ' + a.game)
     out = os.path.join(a.game, 'Mods', a.mod)
     os.makedirs(out, exist_ok=True)
+    # the stock-script hooks as data: the launcher applies them to the player's own fastfiles on first start
+    import json
+    ver = re.search(r'c\.version = "([^"]+)"', open(os.path.join(ROOT, 'mod', 'maps', '_coop.gsc')).read()).group(1)
+    with open(os.path.join(out, 'coop_patches.json'), 'w', encoding='utf-8') as f:
+        json.dump({'version': ver, 'patches': [{'file': p['file'], 'zones': list(p.get('zones', ('common',))),
+                                                 'edits': [{'anchor': e[0], 'mode': e[1], 'payload': e[2]} for e in p['edits']]}
+                                                for p in patches.PATCHES]}, f, indent=1)
 
     n = 0
-    for p in patches.PATCHES:
+    for p in ([] if a.stage else patches.PATCHES):
         src = ffraw.find(a.game, p['file'], p.get('zones', ('common',))).decode('latin-1')
         src = apply_edits(p['file'], src, p['edits'])
         dst = os.path.join(out, p['file'])
@@ -61,7 +73,11 @@ def main():
         with open(dst, 'w', encoding='latin-1', newline='') as f:
             f.write(src)
         n += 1
-    print('patched stock scripts:', n)
+    print('patched stock scripts:', n if not a.stage else 'left to the launcher (release)')
+    if not a.stage:
+        with open(os.path.join(out, '.patched'), 'w') as f:
+            import hashlib
+            f.write(hashlib.sha256(open(os.path.join(out, 'coop_patches.json'), 'rb').read()).hexdigest().upper())
 
     mod_src = os.path.join(ROOT, 'mod')
     c = 0
@@ -85,7 +101,7 @@ def main():
     # custom character skins built by tools/skin/rebind.py + the OAT Linker: mod.ff plus loose .iwi textures
     skins = os.path.join(a.game, 'coop_skins', 'work')  # tools/skin/skinenv.py
     sff = os.path.join(skins, 'zone_out', 'mod.ff')
-    if os.path.isfile(sff):
+    if os.path.isfile(sff) and not a.stage:
         shutil.copyfile(sff, os.path.join(out, 'mod.ff'))
         os.makedirs(os.path.join(out, 'images'), exist_ok=True)
         for fn in os.listdir(os.path.join(skins, 'images')):
