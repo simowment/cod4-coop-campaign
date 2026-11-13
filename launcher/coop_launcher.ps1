@@ -147,38 +147,121 @@ if ($Probe) { $d = Decode-JoinCode $Probe; $r = Probe-Host $d.ip $d.port; if ($r
 # hash of the edit list that was applied, so a new release re-applies them.
 # ------------------------------------------------------------------------------------------------
 $CoopFFCode = @'
-using System; using System.IO; using System.IO.Compression; using System.Text;
-using System.Text.RegularExpressions; using System.Collections.Generic;
+using System; using System.IO; using System.IO.Compression; using System.Text; using System.Linq;
+using System.Text.RegularExpressions; using System.Collections.Generic; using System.Collections.Concurrent;
+using System.Threading; using System.Threading.Tasks;
 public static class CoopFF {
     static readonly Encoding L1 = Encoding.GetEncoding(28591);
-    static readonly Dictionary<string, Dictionary<string, string>> Cache = new Dictionary<string, Dictionary<string, string>>();
-    static readonly Regex Raw = new Regex("\xff\xff\xff\xff(.{4})\xff\xff\xff\xff([a-zA-Z0-9_/\\\\.\\-]{3,120}\\.(?:gsc|csv|cfg|txt|menu|str|vision|atr|gdt|shock|arena|sun))\x00", RegexOptions.Singleline);
-    static Dictionary<string, string> Rawfiles(string ff) {
+    static readonly ConcurrentDictionary<string, Dictionary<string, string>> Cache = new ConcurrentDictionary<string, Dictionary<string, string>>();
+    // background install state, polled by the launcher window
+    public static volatile string Status = "";
+    public static volatile string Error = null;
+    public static volatile bool Done = false;
+    static int zonesDone, zonesTotal;
+    static readonly Regex RawUnused = new Regex("\xff\xff\xff\xff(.{4})\xff\xff\xff\xff([a-zA-Z0-9_/\\\\.\\-]{3,120}\\.(?:gsc|csv|cfg|txt|menu|str|vision|atr|gdt|shock|arena|sun))\x00", RegexOptions.Singleline);
+    // Stream-decompress a fastfile and pull out just the named rawfiles, stopping as soon as all are found.
+    // A rawfile in the zone is: FF FF FF FF <u32 length> FF FF FF FF <name> 00 <length bytes>.
+    static Dictionary<string, string> Rawfiles(string ff, string[] names) {
+        string key = ff + "|" + string.Join(",", names);
         Dictionary<string, string> d;
-        if (Cache.TryGetValue(ff, out d)) return d;
-        byte[] b = File.ReadAllBytes(ff);
-        if (L1.GetString(b, 0, 8) != "IWffu100") throw new Exception("not an IW3 fastfile: " + ff);
-        var ms = new MemoryStream();
-        using (var ds = new DeflateStream(new MemoryStream(b, 14, b.Length - 14), CompressionMode.Decompress)) ds.CopyTo(ms);
-        string z = L1.GetString(ms.ToArray());
+        if (Cache.TryGetValue(key, out d)) return d;
         d = new Dictionary<string, string>();
-        foreach (Match m in Raw.Matches(z)) {
-            string l = m.Groups[1].Value;
-            int len = l[0] | (l[1] << 8) | (l[2] << 16) | (l[3] << 24);
-            if (len > 0 && len < 8000000 && m.Index + m.Length + len <= z.Length)
-                d[m.Groups[2].Value.Replace('\\', '/')] = z.Substring(m.Index + m.Length, len);
+        var pats = names.Select(n => L1.GetBytes(n + "\0")).ToArray();
+        var want = new HashSet<int>(Enumerable.Range(0, names.Length));
+        using (var fs = File.OpenRead(ff)) {
+            var head = new byte[14];
+            fs.Read(head, 0, 14);
+            if (L1.GetString(head, 0, 8) != "IWffu100") throw new Exception("not an IW3 fastfile: " + ff);
+            using (var ds = new DeflateStream(fs, CompressionMode.Decompress)) {
+                const int CH = 1 << 22, KEEP = 512;
+                var buf = new byte[CH + KEEP];
+                int have = 0;                        // bytes valid in buf
+                MemoryStream cap = null; int capLeft = 0; int capName = -1;
+                while (want.Count > 0 || capLeft > 0) {
+                    int n = ds.Read(buf, have, CH);
+                    if (n <= 0) break;
+                    int start = Math.Max(0, have - KEEP);
+                    have += n;
+                    int scanFrom = start;
+                    if (capLeft > 0) {               // finishing a rawfile that crossed the chunk boundary
+                        int take = Math.Min(capLeft, n);
+                        cap.Write(buf, have - n, take); capLeft -= take;
+                        if (capLeft == 0) { d[names[capName]] = L1.GetString(cap.ToArray()); want.Remove(capName); }
+                        scanFrom = have - n + take;
+                    }
+                    for (int w = 0; w < names.Length && capLeft == 0; w++) {
+                        if (!want.Contains(w)) continue;
+                        byte[] pt = pats[w];
+                        for (int q = Math.Max(scanFrom, 12); q + pt.Length <= have; q++) {
+                            if (buf[q] != pt[0]) continue;
+                            int m = 1; while (m < pt.Length && buf[q + m] == pt[m]) m++;
+                            if (m < pt.Length) continue;
+                            if (buf[q - 1] != 0xff || buf[q - 4] != 0xff || buf[q - 9] != 0xff || buf[q - 12] != 0xff) continue;
+                            int len = buf[q - 8] | (buf[q - 7] << 8) | (buf[q - 6] << 16) | (buf[q - 5] << 24);
+                            if (len <= 0 || len > 8000000) continue;
+                            int dataAt = q + pt.Length;
+                            int inBuf = Math.Min(len, have - dataAt);
+                            cap = new MemoryStream(len); cap.Write(buf, dataAt, inBuf);
+                            capLeft = len - inBuf; capName = w;
+                            if (capLeft == 0) { d[names[w]] = L1.GetString(cap.ToArray()); want.Remove(w); }
+                            break;
+                        }
+                    }
+                    // keep the tail so names split across chunks are still found
+                    int keep = Math.Min(KEEP, have);
+                    Buffer.BlockCopy(buf, have - keep, buf, 0, keep);
+                    have = keep;
+                }
+            }
         }
-        Cache[ff] = d;
+        Cache[key] = d;
         return d;
+    }
+    // Patch everything in the background: the fastfiles (one zlib stream each) are decompressed in parallel,
+    // a few at a time to bound memory, then the anchored edits are applied and the scripts written.
+    public static void StartInstall(string zoneDir, string modDir, string jsonPath, string markerHash) {
+        Done = false; Error = null; Status = "starting";
+        var th = new Thread(() => {
+            try {
+                var js = new System.Web.Script.Serialization.JavaScriptSerializer();
+                js.MaxJsonLength = int.MaxValue;
+                var root = (Dictionary<string, object>)js.DeserializeObject(File.ReadAllText(jsonPath));
+                var patches = ((object[])root["patches"]).Cast<Dictionary<string, object>>().ToList();
+                var zones = patches.SelectMany(pt => ((object[])pt["zones"]).Cast<string>()).Distinct().ToList();
+                Needed = zones.ToDictionary(z => z, z => patches.Where(pt => ((object[])pt["zones"]).Cast<string>().Contains(z))
+                                                               .Select(pt => (string)pt["file"]).ToArray());
+                zonesTotal = zones.Count; zonesDone = 0;
+                Status = "reading your game files: 0 of " + zonesTotal;
+                Parallel.ForEach(zones, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Math.Min(4, Environment.ProcessorCount)) }, zn => {
+                    Rawfiles(Path.Combine(zoneDir, zn + ".ff"), Needed[zn]);
+                    int n = Interlocked.Increment(ref zonesDone);
+                    Status = "reading your game files: " + n + " of " + zonesTotal;
+                });
+                Status = "adding the coop hooks";
+                foreach (var pt in patches) {
+                    string file = (string)pt["file"];
+                    string t = Find(zoneDir, file, ((object[])pt["zones"]).Cast<string>().ToArray());
+                    foreach (Dictionary<string, object> ed in (object[])pt["edits"])
+                        t = Apply(file, t, (string)ed["anchor"], (string)ed["mode"], (string)ed["payload"]);
+                    Write(Path.Combine(modDir, file.Replace('/', '\\')), t);
+                }
+                File.WriteAllText(Path.Combine(modDir, ".patched"), markerHash + "\r\n", Encoding.ASCII);
+                Cache.Clear();
+                Status = "done";
+            } catch (Exception e) { Error = e.Message; }
+            Done = true;
+        });
+        th.IsBackground = true;
+        th.Start();
     }
     public static string Find(string zoneDir, string name, string[] zones) {
         foreach (string zn in zones) {
-            var d = Rawfiles(Path.Combine(zoneDir, zn + ".ff"));
             string t;
-            if (d.TryGetValue(name, out t)) return t;
+            if (Needed.ContainsKey(zn) && Rawfiles(Path.Combine(zoneDir, zn + ".ff"), Needed[zn]).TryGetValue(name, out t)) return t;
         }
         throw new Exception(name + " not found in your game files (" + string.Join(", ", zones) + ")");
     }
+    static Dictionary<string, string[]> Needed = new Dictionary<string, string[]>();
     public static string Apply(string file, string text, string anchor, string mode, string payload) {
         var ms = Regex.Matches(text, anchor, RegexOptions.Multiline);
         if (ms.Count != 1) throw new Exception("patch anchor for " + file + " matched " + ms.Count + " times");
@@ -200,17 +283,15 @@ function Test-CoopInstalled {
     $marker = Join-Path $GameDir "Mods\coop\.patched"
     return ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq (Get-FileHash $json -Algorithm SHA256).Hash))
 }
-function Install-CoopScripts {
+function Start-CoopInstall {
     $json = Join-Path $GameDir "Mods\coop\coop_patches.json"
-    if (-not ("CoopFF" -as [type])) { Add-Type -TypeDefinition $CoopFFCode }
-    $p = [IO.File]::ReadAllText($json) | ConvertFrom-Json
-    $zoneDir = Join-Path $GameDir "zone\english"
-    foreach ($e in $p.patches) {
-        $t = [CoopFF]::Find($zoneDir, $e.file, [string[]]$e.zones)
-        foreach ($ed in $e.edits) { $t = [CoopFF]::Apply($e.file, $t, $ed.anchor, $ed.mode, $ed.payload) }
-        [CoopFF]::Write((Join-Path $GameDir ("Mods\coop\" + $e.file)), $t)
-    }
-    Set-Content -Path (Join-Path $GameDir "Mods\coop\.patched") -Value (Get-FileHash $json -Algorithm SHA256).Hash -Encoding ascii
+    if (-not ("CoopFF" -as [type])) { Add-Type -TypeDefinition $CoopFFCode -ReferencedAssemblies System.Web.Extensions, System.Core }
+    [CoopFF]::StartInstall((Join-Path $GameDir "zone\english"), (Join-Path $GameDir "Mods\coop"), $json, (Get-FileHash $json -Algorithm SHA256).Hash)
+}
+function Install-CoopScripts {
+    Start-CoopInstall
+    while (-not [CoopFF]::Done) { Start-Sleep -Milliseconds 100 }
+    if ([CoopFF]::Error) { throw [CoopFF]::Error }
 }
 if ($env:COOP_INSTALL_ONLY) { Install-CoopScripts; "installed"; exit }
 
@@ -484,14 +565,20 @@ $timer.Add_Tick({ if ($script:hostingProc -and $script:hostingProc.HasExited) { 
 $timer.Start()
 $form.Add_FormClosing({ if ($script:hostingProc) { Close-RouterPort } })
 
+# first-start setup runs in the background; the window stays responsive and shows the progress
+$setupTimer = New-Object System.Windows.Forms.Timer; $setupTimer.Interval = 250
+$setupTimer.Add_Tick({
+    if (-not [CoopFF]::Done) { $txtCodes.Text = "First start: setting up the coop scripts from your own game files...`r`n" + [CoopFF]::Status; return }
+    $setupTimer.Stop()
+    if ([CoopFF]::Error) { $txtCodes.Text = "Setup failed: $([CoopFF]::Error)`r`nIs this the CoD4 1.0 game folder (iw3sp.exe, zone\english)?" }
+    else { $txtCodes.Text = "Ready. Pick a mission and start hosting, or join a friend." }
+    $btnHost.Enabled = $true; $btnJoin.Enabled = $true; $btnJoinLan.Enabled = $true
+})
 $form.Add_Shown({
     if (-not (Test-CoopInstalled)) {
         $btnHost.Enabled = $false; $btnJoin.Enabled = $false; $btnJoinLan.Enabled = $false
-        $txtCodes.Text = "First start: adding the coop hooks to the game scripts from your own game files (under a minute)..."
-        $form.Refresh()
-        try { Install-CoopScripts; $txtCodes.Text = "Ready. Pick a mission and start hosting, or join a friend." }
-        catch { $txtCodes.Text = "Setup failed: $($_.Exception.Message)`r`nIs this the CoD4 1.0 game folder (iw3sp.exe, zone\english)?" }
-        $btnHost.Enabled = $true; $btnJoin.Enabled = $true; $btnJoinLan.Enabled = $true
+        try { Start-CoopInstall; $setupTimer.Start() }
+        catch { $txtCodes.Text = "Setup failed: $($_.Exception.Message)"; $btnHost.Enabled = $true; $btnJoin.Enabled = $true; $btnJoinLan.Enabled = $true }
     }
 })
 

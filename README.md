@@ -14,7 +14,7 @@ checkpoints and failures stay in sync.
 
 1. Download `cod4-coop-<version>.zip` from the [latest release](../../releases/latest) and **unzip it into your game folder** (the one
    with `iw3sp.exe`). Double-click **`CoD4 Coop.bat`**. On first start it adds the coop hooks to the game's scripts, reading
-   them from your own game files. That takes under a minute, once.
+   them from your own game files. That takes a few seconds, once.
 2. **Host:** double-click `CoD4 Coop.bat`, enter your name, then **Host a game**. Pick a mission and how
    many players to wait for, and click **Start hosting**. Copy the **join code** (e.g. `2H092-T0W9A`) and send
    it to your friends.
