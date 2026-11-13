@@ -64,10 +64,19 @@ function Get-LocalAddresses {
     return $res
 }
 
+# A UDP socket that ignores "port unreachable" replies: by default Windows turns them into a
+# "connection was closed by the remote host" error on the next receive (SIO_UDP_CONNRESET), which crashed
+# the Join tab whenever a probe hit a machine with no game running.
+function New-ProbeSocket {
+    $u = New-Object System.Net.Sockets.UdpClient 0
+    try { [void]$u.Client.IOControl(-1744830452, [byte[]](0, 0, 0, 0), $null) } catch {}
+    return $u
+}
+
 function Send-Probe([System.Net.Sockets.UdpClient]$u, [System.Net.IPEndPoint]$ep) {
     # 12-byte coop header: magic 'C4' (0x3443 LE), ver 1, type 6 (DISCOVER), rest zero
     $pkt = [byte[]](0x43, 0x34, 1, 6, 0, 0, 0, 0, 0, 0, 0, 0)
-    [void]$u.Send($pkt, $pkt.Length, $ep)
+    try { [void]$u.Send($pkt, $pkt.Length, $ep) } catch {}
 }
 
 function Read-Infos([System.Net.Sockets.UdpClient]$u, [int]$ms) {
@@ -76,7 +85,7 @@ function Read-Infos([System.Net.Sockets.UdpClient]$u, [int]$ms) {
     while ((Get-Date) -lt $end) {
         if ($u.Available -gt 0) {
             $from = New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Any, 0)
-            $data = $u.Receive([ref]$from)
+            try { $data = $u.Receive([ref]$from) } catch { continue }  # a stray ICMP error: keep listening
             if ($data.Length -gt 12 -and $data[0] -eq 0x43 -and $data[1] -eq 0x34 -and $data[3] -eq 7) {
                 $f = [System.Text.Encoding]::ASCII.GetString($data, 12, $data.Length - 12).Split('|')
                 $key = $from.Address.ToString() + ":" + $from.Port
@@ -88,7 +97,7 @@ function Read-Infos([System.Net.Sockets.UdpClient]$u, [int]$ms) {
 }
 
 function Find-LanGames {
-    $u = New-Object System.Net.Sockets.UdpClient 0
+    $u = New-ProbeSocket
     $u.EnableBroadcast = $true
     try {
         Send-Probe $u (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Broadcast, $Port))
@@ -98,10 +107,11 @@ function Find-LanGames {
 }
 
 function Probe-Host([string]$ip, [int]$port) {
-    $u = New-Object System.Net.Sockets.UdpClient 0
+    $u = New-ProbeSocket
     try {
         $ep = New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse($ip), $port)
-        for ($i = 0; $i -lt 3; $i++) { Send-Probe $u $ep; $r = Read-Infos $u 700; if ($r.Count) { return $r[0] } }
+        # @(...): one answer comes back as a single object, which has no .Count in Windows PowerShell 5.1
+        for ($i = 0; $i -lt 3; $i++) { Send-Probe $u $ep; $r = @(Read-Infos $u 700); if ($r.Count) { return $r[0] } }
         return $null
     } finally { $u.Close() }
 }
@@ -362,28 +372,34 @@ function Join-Address([string]$ip, [int]$port) {
 }
 
 $btnJoin.Add_Click({
-    $d = Decode-JoinCode $txtCode.Text
-    if (-not $d) { $lblJoinStatus.Text = "That does not look like a join code (10 letters/digits, like K7F2Q-9QXAM)."; return }
-    $lblJoinStatus.Text = "Looking for the host..."; $form.Refresh()
-    $r = Probe-Host $d.ip $d.port
-    if (-not $r) { $lblJoinStatus.Text = "No answer from that host. Is their game running, and is the code right?"; return }
-    $settings.lastCode = $txtCode.Text.Trim()
-    $lblJoinStatus.Text = "Joining $($r.host) ($($r.map), $($r.players) players)..."; $form.Refresh()
-    Join-Address $d.ip $d.port
+    try {
+        $d = Decode-JoinCode $txtCode.Text
+        if (-not $d) { $lblJoinStatus.Text = "That does not look like a join code (10 letters/digits, like K7F2Q-9QXAM)."; return }
+        $lblJoinStatus.Text = "Looking for the host..."; $form.Refresh()
+        $r = Probe-Host $d.ip $d.port
+        if (-not $r) { $lblJoinStatus.Text = "No answer from that host. Is their game running, and is the code right?"; return }
+        $settings.lastCode = $txtCode.Text.Trim()
+        $lblJoinStatus.Text = "Joining $($r.host) ($($r.map), $($r.players) players)..."; $form.Refresh()
+        Join-Address $d.ip $d.port
+    } catch { $lblJoinStatus.Text = "Something went wrong: $($_.Exception.Message)" }
 })
 
 $btnFind.Add_Click({
-    $lstLan.Items.Clear(); [void]$lstLan.Items.Add("Searching..."); $form.Refresh()
-    $script:lanGames = @(Find-LanGames)
-    $lstLan.Items.Clear()
-    if (-not $script:lanGames.Count) { [void]$lstLan.Items.Add("No games found on this network.") }
-    foreach ($g in $script:lanGames) { [void]$lstLan.Items.Add("$($g.host)  -  $($g.map)  -  $($g.players) players  ($($g.ip))") }
+    try {
+        $lstLan.Items.Clear(); [void]$lstLan.Items.Add("Searching..."); $form.Refresh()
+        $script:lanGames = @(Find-LanGames)
+        $lstLan.Items.Clear()
+        if (-not $script:lanGames.Count) { [void]$lstLan.Items.Add("No games found on this network.") }
+        foreach ($g in $script:lanGames) { [void]$lstLan.Items.Add("$($g.host)  -  $($g.map)  -  $($g.players) players  ($($g.ip))") }
+    } catch { $lblJoinStatus.Text = "Something went wrong: $($_.Exception.Message)" }
 })
 
 $btnJoinLan.Add_Click({
-    $i = $lstLan.SelectedIndex
-    if ($i -lt 0 -or $i -ge $script:lanGames.Count) { $lblJoinStatus.Text = "Pick a game from the list first."; return }
-    $g = $script:lanGames[$i]; Join-Address $g.ip $g.port
+    try {
+        $i = $lstLan.SelectedIndex
+        if ($i -lt 0 -or $i -ge $script:lanGames.Count) { $lblJoinStatus.Text = "Pick a game from the list first."; return }
+        $g = $script:lanGames[$i]; Join-Address $g.ip $g.port
+    } catch { $lblJoinStatus.Text = "Something went wrong: $($_.Exception.Message)" }
 })
 
 # --- skins tab: add any humanoid model (rigged or not), preview, remove. Runs the skin tools (Python) ---
