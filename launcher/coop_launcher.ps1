@@ -843,7 +843,8 @@ $lstSkins = New-Object System.Windows.Forms.ListBox; $lstSkins.Location = "12,12
 $picSkin = New-Object System.Windows.Forms.PictureBox; $picSkin.Location = "172,12"; $picSkin.Size = "290,200"; $picSkin.SizeMode = "Zoom"; $picSkin.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 48)
 $btnAddSkin = New-Object System.Windows.Forms.Button; $btnAddSkin.Text = "Add character..."; $btnAddSkin.Location = "12,218"; $btnAddSkin.Size = "150,30"
 $btnRemoveSkin = New-Object System.Windows.Forms.Button; $btnRemoveSkin.Text = "Remove"; $btnRemoveSkin.Location = "12,252"; $btnRemoveSkin.Size = "150,28"
-$chkFlip = New-Object System.Windows.Forms.CheckBox; $chkFlip.Text = "faces away (auto-rig)"; $chkFlip.Location = "172,220"; $chkFlip.AutoSize = $true
+$chkFlip = New-Object System.Windows.Forms.CheckBox; $chkFlip.Text = "Character walks backwards: turn it around"; $chkFlip.Location = "172,220"; $chkFlip.AutoSize = $true
+$tipFlip = New-Object System.Windows.Forms.ToolTip; $tipFlip.SetToolTip($chkFlip, "Only for models without a skeleton. Tick it if the added character comes out facing the wrong way, then add it again.")
 $txtSkinLog = New-Object System.Windows.Forms.TextBox; $txtSkinLog.Multiline = $true; $txtSkinLog.ReadOnly = $true; $txtSkinLog.ScrollBars = "Vertical"; $txtSkinLog.Location = "172,244"; $txtSkinLog.Size = "290,80"; $txtSkinLog.Font = New-Object System.Drawing.Font("Consolas", 8)
 $txtSkinLog.Text = "Any humanoid model: GLB, glTF, DAE, OBJ (FBX needs Blender). Rigged or not: models without a skeleton are rigged automatically (stand in a T- or A-pose). Friends need the same skins to see them."
 $tabSkins.Controls.AddRange(@($lstSkins, $picSkin, $btnAddSkin, $btnRemoveSkin, $chkFlip, $txtSkinLog))

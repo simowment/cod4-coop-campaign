@@ -46,7 +46,7 @@ automatically, so everyone has the same skins.
 
 **Adding skins from the launcher:** open the **Skins** tab, click **Add character…** and pick a GLB, glTF, DAE,
 OBJ or FBX file (FBX needs Blender). Models without a skeleton are **rigged automatically**: they should stand
-in a T- or A-pose, and you tick "faces away" if the result comes out backwards. The tab shows a preview, and
+in a T- or A-pose, and if one comes out facing the wrong way, re-add it with **"Character walks backwards: turn it around"** ticked. The tab shows a preview, and
 **Remove** drops a skin. It needs Python 3 with `numpy` and `pillow`. On first use it downloads
 OpenAssetTools and reads the soldier skeleton from your own game files. Everything lives in `coop_skins/`
 next to the game.
