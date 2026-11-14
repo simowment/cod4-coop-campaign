@@ -58,10 +58,10 @@
 
 main()
 {
-	// --- shared rifle range: the host's pop-up targets drive everyone's (stock hooks in
-	// killhouse_code.gsc moveTargetDummy / target_down and killhouse.gsc timedTargets) ---
+	// --- shared rifle range: whoever stands at the station drives the pop-up targets for everyone (stock
+	// hooks in killhouse_code.gsc moveTargetDummy / target_down) ---
 	level.coop_target_hook = ::target_hook;
-	level.coop_timed_hook = ::timed_hook;
+	level thread range_watch();
 	h = level.coop.handlers;
 	h[ "KT" ] = ::ev_target;
 	h[ "KH" ] = ::ev_target_hit;
@@ -150,37 +150,107 @@ local_flag_trigger( flagName )
 
 // ---------------------------------------------------------------------------------------------
 // shared rifle range
-//   host:   every raise / lower / knock-down of a target is broadcast ("KT|<entnum>|<command>")
-//   client: its own script may not move targets; it mirrors the host's, and a hit it lands on a
-//           target is sent to the host ("KH|<entnum>"), whose target then goes down for everyone.
-//   The timed drill on the client counts every knocked-down target instead of its own random pick.
+//   The player standing in the rifle stall (rifleTraining_stall) runs their own training exactly like
+//   stock and streams every raise / lower / knock-down of their targets ("KT|<entnum>|<command>").
+//   A player who is NOT at the station mirrors those, and a hit they land is sent back ("KH|<entnum>")
+//   to count for the one training. Their own script's target moves are held while they are away and
+//   replayed the moment they step into the stall, so nobody's training ever waits on the other player.
+//   Both in the stall at once: each runs their own targets (stock behaviour).
 // ---------------------------------------------------------------------------------------------
+
+at_station()
+{
+	if ( !isdefined( level.coop_stall ) || !isdefined( level.player ) )
+		return true;
+	return level.player istouching( level.coop_stall );
+}
+
+range_watch()
+{
+	while ( !isdefined( level.player ) )
+		wait 0.05;
+	for ( ;; )
+	{
+		s = getent( "rifleTraining_stall", "targetname" );
+		if ( isdefined( s ) )
+			break;
+		wait 0.5;
+	}
+	level.coop_stall = s;
+	was = at_station();
+	hushed = false;
+	for ( ;; )
+	{
+		wait 0.1;
+		busy = at_station();
+		if ( busy && !was )
+			replay_held_moves();
+		was = busy;
+		// Gaz nags "go to station one" when our copy of a target is shot from outside the stall; while we
+		// only watch a squadmate's range, those nags are about their targets, not ours
+		watching = !busy && isdefined( level.coop_range_remote ) && gettime() - level.coop_range_remote < 15000;
+		if ( watching && !hushed )
+		{
+			level.waters_speaking = true;
+			hushed = true;
+		}
+		else if ( !watching && hushed )
+		{
+			level.waters_speaking = false;
+			hushed = false;
+		}
+	}
+}
+
+replay_held_moves()
+{
+	targets = getentarray( "rifle_target_dummy", "script_noteworthy" );
+	for ( i = 0; i < targets.size; i++ )
+	{
+		t = targets[ i ];
+		if ( !isdefined( t.coop_want ) )
+			continue;
+		want = t.coop_want;
+		t.coop_want = undefined;
+		if ( want == "raise" && !t.raised )
+			t thread [[ level.coop_fn_move_target ]]( "raise" );
+		else if ( want == "lower" && t.raised )
+			t thread [[ level.coop_fn_move_target ]]( "lower" );
+	}
+}
 
 target_hook( command )
 {
-	c = level.coop;
 	if ( !maps\_coop::in_coop() )
 		return true;
+	if ( isdefined( self.coop_applying ) )
+		return true;
 	id = self getentnum();
-	if ( c.ishost )
+	if ( at_station() )
 	{
+		self.coop_want = undefined;
 		maps\_coop::send( "KT|" + id + "|" + command );
 		return true;
 	}
-	if ( isdefined( self.coop_applying ) )
-		return true;
+	// not at the station: this copy of the range shows the squadmate's targets
 	if ( command == "down" )
-		maps\_coop::send( "KH|" + id ); // a hit here: the host decides, and its knock-down comes back
+	{
+		if ( isdefined( self.raised ) && self.raised )
+			maps\_coop::send( "KH|" + id ); // our hit counts for whoever is training; their knock-down comes back
+		return false;
+	}
+	self.coop_want = command; // our own training wants this: done when we step into the stall
 	return false;
 }
 
 ev_target( slot, tok )
 {
-	if ( level.coop.ishost || tok.size < 4 )
+	if ( tok.size < 4 || at_station() )
 		return;
 	t = getentbynum( int( tok[ 2 ] ) );
 	if ( !isdefined( t ) )
 		return;
+	level.coop_range_remote = gettime();
 	t thread apply_target( tok[ 3 ] );
 }
 
@@ -188,10 +258,7 @@ apply_target( command )
 {
 	self.coop_applying = true;
 	if ( command == "down" )
-	{
-		level notify( "coop_target_hit" );
 		self [[ level.coop_fn_target_down ]]();
-	}
 	else
 		self [[ level.coop_fn_move_target ]]( command );
 	self.coop_applying = undefined;
@@ -199,31 +266,15 @@ apply_target( command )
 
 ev_target_hit( slot, tok )
 {
-	if ( !level.coop.ishost || tok.size < 3 )
+	if ( tok.size < 3 || !at_station() )
 		return;
 	t = getentbynum( int( tok[ 2 ] ) );
 	if ( !isdefined( t ) || !isdefined( t.raised ) || !t.raised || ( isdefined( t.moving ) && t.moving ) )
 		return;
-	// a squadmate's hit counts wherever the host stands: do what the target's own handler does for a valid
-	// hit from the stall (killhouse_code.gsc targetDummyThink): score it ("hit") and knock it down
+	// what the target's own handler does for a valid hit (killhouse_code.gsc targetDummyThink)
 	t notify( "hit" );
+	if ( isdefined( level.targets_hit ) )
+		level.targets_hit++;
+	t playsound( "killhouse_buzzer" );
 	t thread [[ level.coop_fn_target_down ]]();
-}
-
-timed_hook()
-{
-	if ( !maps\_coop::in_coop() || level.coop.ishost )
-		return false;
-	level thread count_shared_hits();
-	return true;
-}
-
-count_shared_hits()
-{
-	level endon( "times_up" );
-	for ( ;; )
-	{
-		level waittill( "coop_target_hit" );
-		level.num_hit++;
-	}
 }

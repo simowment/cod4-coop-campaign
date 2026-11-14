@@ -538,6 +538,8 @@ $Missions = [ordered]@{
 
 $settings = @{ name = $env:USERNAME; mission = "cargoship"; squad = 2; bots = 0; skin = ""; botskin = ""; lastCode = "" }
 if (Test-Path $SettingsFile) { try { (Get-Content $SettingsFile -Raw | ConvertFrom-Json).psobject.Properties | ForEach-Object { $settings[$_.Name] = $_.Value } } catch {} }
+# older launchers saved the skin names as whole PowerShell objects ({"value": "coop_x", "PSPath": ...})
+foreach ($k in @("skin", "botskin")) { $v = $settings[$k]; if ($v -and $v -isnot [string]) { $settings[$k] = if ($v.value) { [string]$v.value } else { "" } } }
 function Save-Settings { try { $settings | ConvertTo-Json | Set-Content -Path $SettingsFile -Encoding UTF8 } catch {} }
 
 # A windowed game whose saved position is off every screen (or with mouse input off) looks like it never started.
@@ -577,7 +579,7 @@ $lblName = New-Object System.Windows.Forms.Label; $lblName.Text = "Your name"; $
 $txtName = New-Object System.Windows.Forms.TextBox; $txtName.Location = "110,13"; $txtName.Width = 170; $txtName.Text = $settings.name; $txtName.MaxLength = 24
 # skins in the installed skin pack (tools/skin): everyone in the session needs the same pack to see them
 $skinFile = Join-Path $GameDir "Mods\coop\skins.txt"
-function Read-SkinNames { if (Test-Path $skinFile) { return @(Get-Content $skinFile | Where-Object { $_.Trim() }) } return @() }
+function Read-SkinNames { if (Test-Path $skinFile) { return @([IO.File]::ReadAllLines($skinFile) | ForEach-Object { $_.Trim() } | Where-Object { $_ }) } return @() }
 $script:SkinNames = @(Read-SkinNames)
 function Fill-SkinBox($b, [string]$current) {
     $b.Items.Clear()
@@ -591,7 +593,7 @@ function New-SkinBox([string]$current, [string]$loc, [int]$w) {
     Fill-SkinBox $b $current
     return $b
 }
-function Get-SkinChoice($b) { if ($b.SelectedIndex -le 0) { return "" } return $script:SkinNames[$b.SelectedIndex - 1] }
+function Get-SkinChoice($b) { if ($b.SelectedIndex -le 0) { return "" } return [string]($script:SkinNames[$b.SelectedIndex - 1]).Trim() }
 $lblSkin = New-Object System.Windows.Forms.Label; $lblSkin.Text = "Skin"; $lblSkin.Location = "292,16"; $lblSkin.AutoSize = $true
 $cmbSkin = New-SkinBox $settings.skin "330,13" 160
 $form.Controls.AddRange(@($lblName, $txtName, $lblSkin, $cmbSkin))
@@ -843,11 +845,14 @@ $lstSkins = New-Object System.Windows.Forms.ListBox; $lstSkins.Location = "12,12
 $picSkin = New-Object System.Windows.Forms.PictureBox; $picSkin.Location = "172,12"; $picSkin.Size = "290,200"; $picSkin.SizeMode = "Zoom"; $picSkin.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 48)
 $btnAddSkin = New-Object System.Windows.Forms.Button; $btnAddSkin.Text = "Add character..."; $btnAddSkin.Location = "12,218"; $btnAddSkin.Size = "150,30"
 $btnRemoveSkin = New-Object System.Windows.Forms.Button; $btnRemoveSkin.Text = "Remove"; $btnRemoveSkin.Location = "12,252"; $btnRemoveSkin.Size = "150,28"
-$chkFlip = New-Object System.Windows.Forms.CheckBox; $chkFlip.Text = "Character walks backwards: turn it around"; $chkFlip.Location = "172,220"; $chkFlip.AutoSize = $true
-$tipFlip = New-Object System.Windows.Forms.ToolTip; $tipFlip.SetToolTip($chkFlip, "Only for models without a skeleton. Tick it if the added character comes out facing the wrong way, then add it again.")
-$txtSkinLog = New-Object System.Windows.Forms.TextBox; $txtSkinLog.Multiline = $true; $txtSkinLog.ReadOnly = $true; $txtSkinLog.ScrollBars = "Vertical"; $txtSkinLog.Location = "172,244"; $txtSkinLog.Size = "290,80"; $txtSkinLog.Font = New-Object System.Drawing.Font("Consolas", 8)
-$txtSkinLog.Text = "Any humanoid model: GLB, glTF, DAE, OBJ (FBX needs Blender). Rigged or not: models without a skeleton are rigged automatically (stand in a T- or A-pose). Friends need the same skins to see them."
-$tabSkins.Controls.AddRange(@($lstSkins, $picSkin, $btnAddSkin, $btnRemoveSkin, $chkFlip, $txtSkinLog))
+$btnEditRig = New-Object System.Windows.Forms.Button; $btnEditRig.Text = "Edit rig..."; $btnEditRig.Location = "12,284"; $btnEditRig.Size = "150,28"
+$tipSkins = New-Object System.Windows.Forms.ToolTip
+$tipSkins.SetToolTip($btnEditRig, "Move the rig markers of the selected skin again and re-rig it. Only for models that came without a skeleton.")
+$txtSkinLog = New-Object System.Windows.Forms.TextBox; $txtSkinLog.Multiline = $true; $txtSkinLog.ReadOnly = $true; $txtSkinLog.ScrollBars = "Vertical"; $txtSkinLog.Location = "172,218"; $txtSkinLog.Size = "290,94"; $txtSkinLog.Font = New-Object System.Drawing.Font("Consolas", 8)
+$txtSkinLog.Text = "Any humanoid model: GLB, glTF, DAE, OBJ (FBX needs Blender). Models without a skeleton (stand in a T- or A-pose) open the rig editor: drag the markers onto the joints and click Rig it. Friends need the same skins to see them."
+$tabSkins.Controls.AddRange(@($lstSkins, $picSkin, $btnAddSkin, $btnRemoveSkin, $btnEditRig, $txtSkinLog))
+$RigDir = Join-Path $GameDir "coop_skins\work\rigs"
+$RigTmp = Join-Path $env:TEMP "coop_rig"
 function Refresh-Skins {
     $script:SkinNames = @(Read-SkinNames)
     $lstSkins.Items.Clear()
@@ -865,18 +870,290 @@ $lstSkins.Add_SelectedIndexChanged({
     if ($picSkin.Image) { $picSkin.Image.Dispose(); $picSkin.Image = $null }
     if (Test-Path $png) { $bytes = [IO.File]::ReadAllBytes($png); $picSkin.Image = [System.Drawing.Image]::FromStream((New-Object IO.MemoryStream(, $bytes))) }
 })
-$script:skinProc = $null; $script:skinOut = $null
+$script:skinProc = $null; $script:skinOut = $null; $script:skinNext = $null
+function Get-SkinToolArgLine([string]$py, [string[]]$toolArgs) {
+    $pre = @(); if ((Split-Path $py -Leaf) -eq "py.exe") { $pre = @("-3") }
+    return ($pre + @("`"$SkinTool`"") + ($toolArgs | ForEach-Object { "`"$_`"" })) -join " "
+}
 function Start-SkinTool([string[]]$toolArgs) {
     $py = Find-Python
     if (-not $py) { $txtSkinLog.Text = "Python 3 is needed for skins (python.org), with: pip install numpy pillow"; return }
     if (-not (Test-Path $SkinTool)) { $txtSkinLog.Text = "Skin tools not installed (run tools/build.py)."; return }
     $script:skinOut = [IO.Path]::GetTempFileName()
-    $pre = @(); if ((Split-Path $py -Leaf) -eq "py.exe") { $pre = @("-3") }
-    $quoted = ($pre + @("`"$SkinTool`"") + ($toolArgs | ForEach-Object { "`"$_`"" })) -join " "
     $env:COOP_GAMEDIR = $GameDir
-    $script:skinProc = Start-Process -FilePath $py -ArgumentList $quoted -NoNewWindow -PassThru -RedirectStandardOutput $script:skinOut -RedirectStandardError "$($script:skinOut).err"
-    $btnAddSkin.Enabled = $false; $btnRemoveSkin.Enabled = $false
+    $script:skinProc = Start-Process -FilePath $py -ArgumentList (Get-SkinToolArgLine $py $toolArgs) -NoNewWindow -PassThru -RedirectStandardOutput $script:skinOut -RedirectStandardError "$($script:skinOut).err"
+    $btnAddSkin.Enabled = $false; $btnRemoveSkin.Enabled = $false; $btnEditRig.Enabled = $false
     $txtSkinLog.Text = "Working... (the first time also sets up the tools, about a minute)"
+}
+# same, but waits (used inside the rig editor; a rigprep takes a few seconds). Returns @{ ok; text }
+# The window keeps processing messages meanwhile (callers disable their buttons), so it never shows "Not Responding".
+function Invoke-SkinToolSync([string[]]$toolArgs, $lblStatus) {
+    $py = Find-Python
+    if (-not $py) { return @{ ok = $false; text = "Python 3 is needed for skins (python.org), with: pip install numpy pillow" } }
+    if (-not (Test-Path $SkinTool)) { return @{ ok = $false; text = "Skin tools not installed (run tools/build.py)." } }
+    $out = [IO.Path]::GetTempFileName()
+    $env:COOP_GAMEDIR = $GameDir
+    $p = Start-Process -FilePath $py -ArgumentList (Get-SkinToolArgLine $py $toolArgs) -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+    $n = 0
+    while (-not $p.WaitForExit(40)) {
+        [System.Windows.Forms.Application]::DoEvents()
+        if ((++$n % 5) -eq 0) {
+            try { $last = @([IO.File]::ReadAllText($out) -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 1; if ($last) { $lblStatus.Text = "Working... $last" } } catch {}
+        }
+    }
+    $log = ""; $err = ""
+    try { $log = [IO.File]::ReadAllText($out) } catch {}
+    try { $err = [IO.File]::ReadAllText("$out.err") } catch {}
+    try { Remove-Item -LiteralPath $out, "$out.err" -Force } catch {}
+    if ($log -match "(?m)^OK") { return @{ ok = $true; text = "" } }
+    $t = @($log -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 3
+    $e = @($err -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 3
+    return @{ ok = $false; text = ((@($t) + @($e)) -join "`r`n") }
+}
+
+# --- rig editor for models without a skeleton (like Mixamo): drag 8 markers onto a front view of the character.
+# The json/png come from "addskin.py rigprep"; markers are pixels in that image, image RIGHT = the character's LEFT.
+$RigMarkers = @(
+    @{ k = "chin";        t = "Chin";    c = [System.Drawing.Color]::Gold },
+    @{ k = "groin";       t = "Groin";   c = [System.Drawing.Color]::Gold },
+    @{ k = "left_elbow";  t = "L elbow"; c = [System.Drawing.Color]::FromArgb(70, 190, 255) },
+    @{ k = "right_elbow"; t = "R elbow"; c = [System.Drawing.Color]::FromArgb(70, 190, 255) },
+    @{ k = "left_wrist";  t = "L wrist"; c = [System.Drawing.Color]::FromArgb(255, 140, 40) },
+    @{ k = "right_wrist"; t = "R wrist"; c = [System.Drawing.Color]::FromArgb(255, 140, 40) },
+    @{ k = "left_knee";   t = "L knee";  c = [System.Drawing.Color]::FromArgb(90, 220, 90) },
+    @{ k = "right_knee";  t = "R knee";  c = [System.Drawing.Color]::FromArgb(90, 220, 90) }
+)
+$RigMirror = @{ left_elbow = "right_elbow"; right_elbow = "left_elbow"; left_wrist = "right_wrist"; right_wrist = "left_wrist"; left_knee = "right_knee"; right_knee = "left_knee" }
+$RigBones = @(@("chin", "groin"), @("chin", "left_elbow"), @("left_elbow", "left_wrist"), @("chin", "right_elbow"), @("right_elbow", "right_wrist"), @("groin", "left_knee"), @("groin", "right_knee"))
+function Read-RigJson([string]$path) { return ([IO.File]::ReadAllText($path) | ConvertFrom-Json) }
+# pure ASCII (non-ASCII as \uXXXX), so Python reads it the same whatever its default code page is
+$RigJsonEsc = [System.Text.RegularExpressions.MatchEvaluator] { param($mt) '\u{0:x4}' -f [int][char]$mt.Value }
+function Write-RigJson([string]$path, $data) {
+    $j = [regex]::Replace(($data | ConvertTo-Json -Depth 8), '[^\x00-\x7F]', $RigJsonEsc)
+    [IO.File]::WriteAllText($path, $j, (New-Object System.Text.ASCIIEncoding))
+}
+function Copy-RigPoints($pts) { $o = @{}; foreach ($k in @($pts.Keys)) { $o[$k] = @([double]$pts[$k][0], [double]$pts[$k][1]) }; return $o }
+function Rig-Load {
+    $d = Read-RigJson $script:rg.json
+    if ($d.rigged) { throw "This model has its own skeleton, it needs no rig." }
+    $img = [string]$d.image
+    if (-not $img -or -not (Test-Path -LiteralPath $img)) { $img = [IO.Path]::ChangeExtension($script:rg.json, ".png") }
+    $bytes = [IO.File]::ReadAllBytes($img)          # copy through memory so the png is not locked
+    $ms = New-Object IO.MemoryStream(, $bytes); $tmp = [System.Drawing.Image]::FromStream($ms)
+    $bmp = New-Object System.Drawing.Bitmap $tmp; $tmp.Dispose(); $ms.Dispose()
+    $old = $script:rg.pic.Image; $script:rg.pic.Image = $bmp; if ($old) { $old.Dispose() }
+    $size = [double]$d.size; if (-not $size) { $size = [double]$bmp.Width }
+    $script:rg.size = $size; $script:rg.scale = 512.0 / $size
+    $pts = @{}
+    foreach ($m in $RigMarkers) {
+        $v = $null; if ($d.markers) { $v = $d.markers.($m.k) }
+        if ($v -and @($v).Count -ge 2) { $pts[$m.k] = @([double]$v[0], [double]$v[1]) } else { $pts[$m.k] = @(($size / 2), ($size / 2)) }
+    }
+    $script:rg.pts = $pts; $script:rg.orig = Copy-RigPoints $pts; $script:rg.data = $d
+    $face = "as found"; if ($d.flip) { $face = "turned around" }
+    # flip_auto = what the facing detector would pick; when flip differs, the user turned it
+    $how = "guessed"; if ($d.PSObject.Properties["flip_auto"] -and ([bool]$d.flip -ne [bool]$d.flip_auto)) { $how = "set by you" }
+    $script:rg.info.Text = "Facing: $face ($how). Up axis: $(([string]$d.up).ToUpper())."
+    $script:rg.pic.Invalidate()
+}
+function Rig-Hit([double]$x, [double]$y) {
+    $best = $null; $bd = 14.0; $sc = $script:rg.scale
+    foreach ($m in $RigMarkers) {
+        $p = $script:rg.pts[$m.k]; $d = [math]::Sqrt([math]::Pow($p[0] * $sc - $x, 2) + [math]::Pow($p[1] * $sc - $y, 2))
+        if ($d -le $bd) { $bd = $d; $best = $m.k }
+    }
+    return $best
+}
+function Rig-Centre { return (($script:rg.pts["chin"][0] + $script:rg.pts["groin"][0]) / 2.0) }
+function Rig-Move([string]$k, [double]$x, [double]$y) {
+    # double literals everywhere: [math]::Max(0, ...) would pick the int overload and round to whole pixels
+    $max = [double]$script:rg.size - 1.0
+    $x = [math]::Max(0.0, [math]::Min($max, [double]$x)); $y = [math]::Max(0.0, [math]::Min($max, [double]$y))
+    $script:rg.pts[$k] = @($x, $y)
+    if ($script:rg.sym.Checked -and $RigMirror.ContainsKey($k)) {
+        $mx = [math]::Max(0.0, [math]::Min($max, [double](2.0 * (Rig-Centre) - $x)))
+        $script:rg.pts[$RigMirror[$k]] = @($mx, $y)
+    }
+}
+function Rig-Paint($g) {
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $sc = $script:rg.scale; $p = $script:rg.pts
+    if ($script:rg.sym.Checked) {
+        $cx = [float]((Rig-Centre) * $sc)
+        $dash = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(90, 255, 255, 255)), 1
+        $dash.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash; $g.DrawLine($dash, $cx, [float]0, $cx, [float]512); $dash.Dispose()
+    }
+    $shadow = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(160, 0, 0, 0)), 5
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(230, 255, 255, 255)), 2
+    foreach ($b in $RigBones) {
+        $a = $p[$b[0]]; $c = $p[$b[1]]
+        $g.DrawLine($shadow, [float]($a[0] * $sc), [float]($a[1] * $sc), [float]($c[0] * $sc), [float]($c[1] * $sc))
+        $g.DrawLine($pen, [float]($a[0] * $sc), [float]($a[1] * $sc), [float]($c[0] * $sc), [float]($c[1] * $sc))
+    }
+    $shadow.Dispose(); $pen.Dispose()
+    $font = New-Object System.Drawing.Font("Segoe UI", 8.5, [System.Drawing.FontStyle]::Bold)
+    $ring = New-Object System.Drawing.Pen ([System.Drawing.Color]::Black), 2
+    $dots = @(); foreach ($m in $RigMarkers) { $dots += , (New-Object System.Drawing.RectangleF ([float]($p[$m.k][0] * $sc - 10)), ([float]($p[$m.k][1] * $sc - 10)), ([float]20), ([float]20)) }
+    $taken = New-Object System.Collections.ArrayList
+    foreach ($m in $RigMarkers) {
+        $x = [float]($p[$m.k][0] * $sc); $y = [float]($p[$m.k][1] * $sc)
+        $r = [float]7; if ($script:rg.drag -eq $m.k -or $script:rg.hover -eq $m.k) { $r = [float]9 }
+        $br = New-Object System.Drawing.SolidBrush $m.c
+        $g.FillEllipse($br, $x - $r, $y - $r, 2 * $r, 2 * $r); $g.DrawEllipse($ring, $x - $r, $y - $r, 2 * $r, 2 * $r); $br.Dispose()
+    }
+    $i = 0
+    foreach ($m in $RigMarkers) {
+        $x = [float]($p[$m.k][0] * $sc); $y = [float]($p[$m.k][1] * $sc)
+        $sz = $g.MeasureString($m.t, $font); $w = [float]$sz.Width; $h = [float]$sz.Height
+        # labels sit outside the body; when that spot covers another marker or label, try above, below, then the other side
+        $out = $x + 12; $in = $x - 12 - $w; if ($m.k -like "right_*") { $out = $x - 12 - $w; $in = $x + 12 }
+        $cands = @(@($out, ($y - $h / 2)), @(($x - $w / 2), ($y - 12 - $h)), @(($x - $w / 2), ($y + 12)), @($in, ($y - $h / 2)))
+        $pick = $cands[0]
+        foreach ($c in $cands) {
+            $rc = New-Object System.Drawing.RectangleF ([float]$c[0]), ([float]$c[1]), $w, $h
+            $hit = $false
+            for ($j = 0; $j -lt $dots.Count; $j++) { if ($j -ne $i -and $rc.IntersectsWith($dots[$j])) { $hit = $true; break } }
+            if (-not $hit) { foreach ($t in $taken) { if ($rc.IntersectsWith($t)) { $hit = $true; break } } }
+            if (-not $hit) { $pick = $c; break }
+        }
+        $tx = [float]$pick[0]; $ty = [float]$pick[1]
+        [void]$taken.Add((New-Object System.Drawing.RectangleF $tx, $ty, $w, $h))
+        $g.DrawString($m.t, $font, [System.Drawing.Brushes]::Black, [float]($tx + 1), [float]($ty + 1))
+        $g.DrawString($m.t, $font, [System.Drawing.Brushes]::White, $tx, $ty)
+        $i++
+    }
+    $ring.Dispose(); $font.Dispose()
+}
+# has the user moved any marker away from the guess?
+function Rig-Changed {
+    foreach ($m in $RigMarkers) {
+        $a = $script:rg.pts[$m.k]; $b = $script:rg.orig[$m.k]
+        if ([math]::Abs($a[0] - $b[0]) -gt 0.05 -or [math]::Abs($a[1] - $b[1]) -gt 0.05) { return $true }
+    }
+    return $false
+}
+# re-runs rigprep with other facing/up options. $mode "turn": markers the user moved are turned with the model
+# (mirrored left/right through the model space, since a turn is 180 degrees about the up axis); "up": they cannot
+# be kept, so ask first.
+function Rig-Rerun([string[]]$extra, [string]$mode) {
+    $r = $script:rg
+    $changed = Rig-Changed
+    if ($mode -eq "up" -and $changed -and -not $r.test) {
+        $q = [System.Windows.Forms.MessageBox]::Show($r.form, "Swapping the up axis puts every marker back to a new guess, so the markers you moved are lost. Continue?", "Swap up axis", "YesNo", "Question")
+        if ($q -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+    }
+    $keep = $null
+    if ($mode -eq "turn" -and $changed) {
+        $v = $r.data.view; $s = [double]$r.size; $keep = @{}
+        foreach ($m in $RigMarkers) { $q = $r.pts[$m.k]; $keep[$m.k] = @(([double]$v.cx + ($q[0] - $s / 2) / $s * [double]$v.span), ([double]$v.cy - ($q[1] - $s / 2) / $s * [double]$v.span)) }
+    }
+    $buttons = @($r.turn, $r.up, $r.reset, $r.ok, $r.cancel, $r.sym)
+    foreach ($b in $buttons) { $b.Enabled = $false }
+    $r.pic.Enabled = $false; $r.drag = $null; $r.busy = $true
+    $r.form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor; $r.status.ForeColor = [System.Drawing.SystemColors]::ControlText
+    $r.status.Text = "Working... (a few seconds)"; $r.form.Refresh()
+    try {
+        $res = Invoke-SkinToolSync (@("rigprep", $r.src, $r.json) + $extra) $r.status
+        if ($res.ok) {
+            Rig-Load
+            if ($keep) {
+                $v = $r.data.view; $s = [double]$r.size; $max = $s - 1.0
+                foreach ($m in $RigMarkers) {
+                    $from = $m.k; if ($RigMirror.ContainsKey($from)) { $from = $RigMirror[$from] }   # its left is now on the other side
+                    $X = - $keep[$from][0]; $Y = $keep[$from][1]
+                    $px = $s / 2 + ($X - [double]$v.cx) / [double]$v.span * $s; $py = $s / 2 - ($Y - [double]$v.cy) / [double]$v.span * $s
+                    $r.pts[$m.k] = @([math]::Max(0.0, [math]::Min($max, [double]$px)), [math]::Max(0.0, [math]::Min($max, [double]$py)))
+                }
+                $r.pic.Invalidate()
+                $r.status.Text = "Done. Your markers were turned with the model (Reset markers gives the new guess). Check them again."
+            } else { $r.status.Text = "Done. Check the markers again." }
+        }
+        else { $r.status.ForeColor = [System.Drawing.Color]::DarkRed; $r.status.Text = "Failed: " + $res.text }
+    } catch { $r.status.ForeColor = [System.Drawing.Color]::DarkRed; $r.status.Text = "Failed: $($_.Exception.Message)" }
+    finally { foreach ($b in $buttons) { $b.Enabled = $true }; $r.pic.Enabled = $true; $r.busy = $false; $r.form.Cursor = [System.Windows.Forms.Cursors]::Default }
+}
+# shows the editor on a rigprep json; on "Rig it" writes the markers back into it and returns $true
+function Show-RigEditor([string]$json, [string]$src, [scriptblock]$test = $null) {
+    $f = New-Object System.Windows.Forms.Form
+    $f.Text = "Rig the character"; $f.ClientSize = New-Object System.Drawing.Size 760, 528
+    $f.FormBorderStyle = "FixedDialog"; $f.MaximizeBox = $false; $f.MinimizeBox = $false; $f.StartPosition = "CenterParent"
+    $f.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    if ($test) { $f.StartPosition = "Manual"; $f.Location = New-Object System.Drawing.Point -4000, -4000; $f.ShowInTaskbar = $false }
+    $pic = New-Object System.Windows.Forms.PictureBox; $pic.Location = "8,8"; $pic.Size = "512,512"; $pic.SizeMode = "StretchImage"
+    $pic.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 48)
+    $help = New-Object System.Windows.Forms.Label; $help.Location = "532,8"; $help.Size = "220,222"
+    $help.Text = "Drag each circle onto the middle of that joint. The character faces you, so its LEFT side is on the RIGHT of the picture.`r`n`r`nChin: just under the mouth.`r`nGroin: where the legs meet.`r`nElbows, wrists, knees: the centre of each joint.`r`n`r`nSeeing its back? Click Turn around. Lying on its back or front? Click Swap up axis."
+    $sym = New-Object System.Windows.Forms.CheckBox; $sym.Text = "Symmetry (the other side follows)"; $sym.Location = "532,232"; $sym.AutoSize = $true; $sym.Checked = $true
+    $info = New-Object System.Windows.Forms.Label; $info.Location = "532,258"; $info.Size = "220,36"
+    $btnTurn = New-Object System.Windows.Forms.Button; $btnTurn.Text = "Turn around"; $btnTurn.Location = "532,296"; $btnTurn.Size = "220,30"
+    $btnUp = New-Object System.Windows.Forms.Button; $btnUp.Text = "Swap up axis"; $btnUp.Location = "532,330"; $btnUp.Size = "220,30"
+    $btnReset = New-Object System.Windows.Forms.Button; $btnReset.Text = "Reset markers"; $btnReset.Location = "532,364"; $btnReset.Size = "220,30"
+    $status = New-Object System.Windows.Forms.Label; $status.Location = "532,400"; $status.Size = "220,78"
+    $btnOk = New-Object System.Windows.Forms.Button; $btnOk.Text = "Rig it"; $btnOk.Location = "532,484"; $btnOk.Size = "124,36"
+    $btnOk.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+    $btnCancel = New-Object System.Windows.Forms.Button; $btnCancel.Text = "Cancel"; $btnCancel.Location = "662,484"; $btnCancel.Size = "90,36"
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel; $f.CancelButton = $btnCancel; $f.AcceptButton = $btnOk
+    $f.Controls.AddRange(@($pic, $help, $sym, $info, $btnTurn, $btnUp, $btnReset, $status, $btnOk, $btnCancel))
+    $script:rg = @{ form = $f; pic = $pic; sym = $sym; info = $info; status = $status; turn = $btnTurn; up = $btnUp; reset = $btnReset; ok = $btnOk; cancel = $btnCancel
+                    json = $json; src = $src; data = $null; pts = @{}; orig = @{}; size = 512.0; scale = 1.0; drag = $null; grab = @(0, 0); hover = $null; test = $test; busy = $false }
+    $f.Add_FormClosing({ param($s, $e) if ($script:rg.busy) { $e.Cancel = $true } })   # not while rigprep runs
+    $pic.Add_Paint({ param($s, $e) try { Rig-Paint $e.Graphics } catch {} })
+    $pic.Add_MouseDown({ param($s, $e)
+        if ($e.Button -ne "Left") { return }
+        $r = $script:rg; $r.drag = Rig-Hit $e.X $e.Y
+        if ($r.drag) { $q = $r.pts[$r.drag]; $r.grab = @(($q[0] * $r.scale - $e.X), ($q[1] * $r.scale - $e.Y)) }   # no jump to the cursor
+        $r.pic.Invalidate()
+    })
+    $pic.Add_MouseMove({ param($s, $e)
+        $r = $script:rg
+        if ($r.drag) { Rig-Move $r.drag (($e.X + $r.grab[0]) / $r.scale) (($e.Y + $r.grab[1]) / $r.scale); $r.pic.Invalidate(); return }
+        $h = Rig-Hit $e.X $e.Y
+        if ($h -ne $r.hover) { $r.hover = $h; $r.pic.Invalidate() }
+        if ($h) { $r.pic.Cursor = [System.Windows.Forms.Cursors]::Hand } else { $r.pic.Cursor = [System.Windows.Forms.Cursors]::Default }
+    })
+    $pic.Add_MouseUp({ param($s, $e) $script:rg.drag = $null; $script:rg.pic.Invalidate() })
+    $sym.Add_CheckedChanged({ $script:rg.pic.Invalidate() })
+    $btnReset.Add_Click({ $script:rg.pts = Copy-RigPoints $script:rg.orig; $script:rg.status.Text = ""; $script:rg.pic.Invalidate() })
+    $btnTurn.Add_Click({
+        $d = $script:rg.data; $fl = "1"; if ($d.flip) { $fl = "0" }
+        $up = [string]$d.up; if (-not $up) { $up = "auto" }
+        Rig-Rerun @("--flip", $fl, "--up", $up) "turn"
+    })
+    $btnUp.Add_Click({ $up = "z"; if ([string]$script:rg.data.up -eq "z") { $up = "y" }; Rig-Rerun @("--up", $up, "--flip", "auto") "up" })
+    $btnOk.Add_Click({
+        try {
+            $d = $script:rg.data
+            if (-not $d.markers) { $d | Add-Member -NotePropertyName markers -NotePropertyValue ([pscustomobject]@{}) -Force }
+            foreach ($m in $RigMarkers) {
+                $p = $script:rg.pts[$m.k]
+                $d.markers | Add-Member -NotePropertyName $m.k -NotePropertyValue @([math]::Round($p[0], 1), [math]::Round($p[1], 1)) -Force
+            }
+            Write-RigJson $script:rg.json $d
+            $script:rg.form.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        } catch { $script:rg.status.ForeColor = [System.Drawing.Color]::DarkRed; $script:rg.status.Text = "Could not save the markers: $($_.Exception.Message)" }
+    })
+    $f.Add_Shown({ if ($script:rg.test) { try { & $script:rg.test $script:rg.form } catch { $script:rg.status.Text = "TEST ERROR $($_.Exception.Message)"; $script:rg.form.Close() } } })
+    try { Rig-Load } catch { $f.Dispose(); throw }
+    if (-not $script:rg.src) { $script:rg.src = [string]$script:rg.data.source }
+    if ($form.Visible) { $res = $f.ShowDialog($form) } else { $res = $f.ShowDialog() }
+    if ($pic.Image) { $pic.Image.Dispose() }
+    $f.Dispose()
+    return ($res -eq [System.Windows.Forms.DialogResult]::OK)
+}
+# runs the editor from the skins tab (the tool timer pauses meanwhile); $true when the user clicked Rig it
+function Open-RigEditor([string]$json, [string]$src) {
+    $skinTimer.Stop()
+    try { return (Show-RigEditor $json $src) }
+    catch { $txtSkinLog.Text = "Could not open the rig editor: $($_.Exception.Message)"; return $false }
+    finally { $skinTimer.Start() }
+}
+# after "rigprep" finished: rigged models are added straight away, the others go through the editor first
+function Continue-SkinAdd($n, [string]$log) {
+    if ($log -notmatch "(?m)^OK rigprep") { return }
+    try { $d = Read-RigJson $n.json } catch { $txtSkinLog.Text = "Could not read the rig file: $($_.Exception.Message)"; return }
+    if ($d.rigged) { Start-SkinTool @("add", $n.file, $n.name); return }
+    if (Open-RigEditor $n.json $n.file) { Start-SkinTool @("add", $n.file, $n.name, "--rig", $n.json) }
+    elseif ($txtSkinLog.Text -notmatch "^Could not") { $txtSkinLog.Text = "Cancelled: nothing was added." }
 }
 $skinTimer = New-Object System.Windows.Forms.Timer; $skinTimer.Interval = 400
 $skinTimer.Add_Tick({
@@ -889,10 +1166,12 @@ $skinTimer.Add_Tick({
         $err = ""; try { $err = [IO.File]::ReadAllText("$($script:skinOut).err") } catch {}
         if ($log -notmatch "(?m)^OK" -and $err) { $txtSkinLog.Text += "`r`n" + (($err -split "`r?`n" | Select-Object -Last 4) -join "`r`n") }
         $script:skinProc = $null
-        $btnAddSkin.Enabled = $true; $btnRemoveSkin.Enabled = $true
+        $btnAddSkin.Enabled = $true; $btnRemoveSkin.Enabled = $true; $btnEditRig.Enabled = $true
         $sel = $null; if ($log -match "(?m)^OK (coop_\w+)") { $sel = $Matches[1] }
         Refresh-Skins
         if ($sel) { $k = [array]::IndexOf($script:SkinNames, $sel); if ($k -ge 0) { $lstSkins.SelectedIndex = $k } }
+        $n = $script:skinNext; $script:skinNext = $null
+        if ($n) { try { Continue-SkinAdd $n $log } catch { $txtSkinLog.Text = "Something went wrong: $($_.Exception.Message)" } }
     }
 })
 $skinTimer.Start()
@@ -902,12 +1181,53 @@ $btnAddSkin.Add_Click({
     if ($dlg.ShowDialog() -ne "OK") { return }
     $name = ([IO.Path]::GetFileNameWithoutExtension($dlg.FileName) -replace '[^A-Za-z0-9_]', '_').ToLower().Trim('_')
     if (-not $name) { $name = "skin" }
-    $a = @("add", $dlg.FileName, $name); if ($chkFlip.Checked) { $a += "--flip" }
-    Start-SkinTool $a
+    try { [void](New-Item -ItemType Directory -Force -Path $RigTmp) } catch {}
+    $json = Join-Path $RigTmp ("coop_" + $name + ".json")
+    try { Remove-Item -LiteralPath $json, ([IO.Path]::ChangeExtension($json, ".png")) -Force -ErrorAction SilentlyContinue } catch {}
+    # step 1: rigprep (is it rigged? front view + guessed markers); the timer continues with Continue-SkinAdd
+    Start-SkinTool @("rigprep", $dlg.FileName, $json)
+    if ($script:skinProc) { $script:skinNext = @{ file = $dlg.FileName; name = $name; json = $json } }
 })
 $btnRemoveSkin.Add_Click({
     $i = $lstSkins.SelectedIndex; if ($i -lt 0) { $txtSkinLog.Text = "Pick a skin in the list first."; return }
     Start-SkinTool @("remove", $script:SkinNames[$i])
+})
+$btnEditRig.Add_Click({
+    try {
+        $i = $lstSkins.SelectedIndex; if ($i -lt 0) { $txtSkinLog.Text = "Pick a skin in the list first."; return }
+        $model = $script:SkinNames[$i]; $short = $model -replace '^coop_', ''
+        $rj = Join-Path $RigDir ($model + ".json")
+        if (-not (Test-Path -LiteralPath $rj)) {
+            $txtSkinLog.Text = "'$short' has no rig to edit: it came with its own skeleton (or was added before the rig editor). To rig it by hand, Remove it and add it again."
+            return
+        }
+        $d = Read-RigJson $rj; $src = [string]$d.source
+        if (-not $src -or -not (Test-Path -LiteralPath $src)) { $txtSkinLog.Text = "The original model file is missing:`r`n$src`r`nPut it back there, or Remove the skin and add it again."; return }
+        # edit a copy, so Cancel (or a Turn around that is not kept) leaves the saved rig alone
+        [void](New-Item -ItemType Directory -Force -Path $RigTmp)
+        $tj = Join-Path $RigTmp ($model + ".json"); $tp = [IO.Path]::ChangeExtension($tj, ".png")
+        $png = [string]$d.image; if (-not $png -or -not (Test-Path -LiteralPath $png)) { $png = [IO.Path]::ChangeExtension($rj, ".png") }
+        if (Test-Path -LiteralPath $png) {
+            Copy-Item -LiteralPath $png -Destination $tp -Force
+            $d | Add-Member -NotePropertyName image -NotePropertyValue $tp -Force
+        } else {
+            # the front view is gone: make it again with the saved facing and up axis, then put the saved markers back
+            $up = [string]$d.up; if ($up -notin @("y", "z")) { $up = "auto" }
+            $fl = "auto"; if ($d.PSObject.Properties["flip"]) { if ($d.flip) { $fl = "1" } else { $fl = "0" } }
+            $btnAddSkin.Enabled = $false; $btnRemoveSkin.Enabled = $false; $btnEditRig.Enabled = $false
+            $txtSkinLog.Text = "The rig picture is missing, making it again..."
+            try { $res = Invoke-SkinToolSync @("rigprep", $src, $tj, "--flip", $fl, "--up", $up) $txtSkinLog }
+            finally { $btnAddSkin.Enabled = $true; $btnRemoveSkin.Enabled = $true; $btnEditRig.Enabled = $true }
+            if (-not $res.ok) { $txtSkinLog.Text = "Could not make the rig picture again:`r`n$($res.text)"; return }
+            $n = Read-RigJson $tj
+            if ($n.rigged) { $txtSkinLog.Text = "'$short' now loads with its own skeleton, so it needs no rig."; return }
+            if ($d.markers) { $n | Add-Member -NotePropertyName markers -NotePropertyValue $d.markers -Force }
+            $d = $n
+        }
+        Write-RigJson $tj $d
+        if (Open-RigEditor $tj $src) { Start-SkinTool @("add", $src, $short, "--rig", $tj) }
+        elseif ($txtSkinLog.Text -notmatch "^Could not") { $txtSkinLog.Text = "Cancelled: '$short' was not changed." }
+    } catch { $txtSkinLog.Text = "Something went wrong: $($_.Exception.Message)" }
 })
 Refresh-Skins
 
@@ -980,6 +1300,45 @@ $form.Add_Shown({
         catch { $txtCodes.Text = "Setup failed: $($_.Exception.Message)"; $btnHost.Enabled = $true; $btnJoin.Enabled = $true; $btnJoinLan.Enabled = $true }
     }
 })
+
+# test hook: rig editor headless (COOP_TEST_RIGEDITOR=<rigprep json>, COOP_TEST_SHOT=<png>). Drags the L wrist
+# marker with symmetry on, saves a screenshot, clicks "Rig it" (markers written back into the json), log in <json>.log
+if ($env:COOP_TEST_RIGEDITOR) {
+    $tj = $env:COOP_TEST_RIGEDITOR; $tlog = "$tj.log"; Set-Content -Path $tlog -Value "START"
+    $fmt = { ($RigMarkers | ForEach-Object { $p = $script:rg.pts[$_.k]; "{0}={1},{2}" -f $_.k, [math]::Round($p[0], 1), [math]::Round($p[1], 1) }) -join " " }
+    $test = {
+        param($f)
+        $pic = $script:rg.pic; $sc = $script:rg.scale
+        Add-Content -Path $tlog -Value ("BEFORE " + (& $fmt))
+        $p = $script:rg.pts["left_wrist"]; $x = [int]($p[0] * $sc); $y = [int]($p[1] * $sc)
+        $call = { param($n, $ex, $ey)
+            $ea = [System.Windows.Forms.MouseEventArgs]::new([System.Windows.Forms.MouseButtons]::Left, 1, [int]$ex, [int]$ey, 0)
+            [void]$pic.GetType().GetMethod($n, [Reflection.BindingFlags]"NonPublic,Instance").Invoke($pic, [object[]]@($ea.PSObject.BaseObject)) }
+        & $call "OnMouseDown" ($x + 4) ($y + 3)          # grab a little off-centre (hit radius)
+        & $call "OnMouseMove" ($x + 20) ($y + 12)
+        & $call "OnMouseMove" ($x + 36) ($y + 24)
+        Add-Content -Path $tlog -Value ("DRAG " + $script:rg.drag)
+        & $call "OnMouseUp" ($x + 36) ($y + 24)
+        Add-Content -Path $tlog -Value ("AFTER " + (& $fmt))
+        $c = Rig-Centre; $l = $script:rg.pts["left_wrist"]; $r = $script:rg.pts["right_wrist"]
+        Add-Content -Path $tlog -Value ("MIRROR centre={0} left={1} right={2} ok={3}" -f [math]::Round($c, 1), [math]::Round($l[0], 1), [math]::Round($r[0], 1), ([math]::Abs(($l[0] + $r[0]) / 2 - $c) -lt 0.01 -and $l[1] -eq $r[1]))
+        if ($env:COOP_TEST_RIGACTION) {      # optional: also press "turn" or "up" (re-runs rigprep through python)
+            $b = $script:rg.turn; if ($env:COOP_TEST_RIGACTION -eq "up") { $b = $script:rg.up }
+            [void]$b.GetType().GetMethod("OnClick", [Reflection.BindingFlags]"NonPublic,Instance").Invoke($b, @([EventArgs]::Empty))
+            Add-Content -Path $tlog -Value ("ACTION " + $env:COOP_TEST_RIGACTION + ": " + ($script:rg.status.Text -replace "`r?`n", " / ") + " | " + $script:rg.info.Text)
+            Add-Content -Path $tlog -Value ("LOADED " + (& $fmt))
+        }
+        if ($env:COOP_TEST_SHOT) {
+            $f.Refresh()
+            $bmp = New-Object System.Drawing.Bitmap $f.Width, $f.Height
+            $f.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle 0, 0, $f.Width, $f.Height)); $bmp.Save($env:COOP_TEST_SHOT); $bmp.Dispose()
+        }
+        [void]$script:rg.ok.GetType().GetMethod("OnClick", [Reflection.BindingFlags]"NonPublic,Instance").Invoke($script:rg.ok, @([EventArgs]::Empty))
+    }
+    try { $ok = Show-RigEditor $tj "" $test; Add-Content -Path $tlog -Value "RESULT $ok"; if (-not $ok) { Add-Content -Path $tlog -Value ("STATUS " + $script:rg.status.Text) } }
+    catch { Add-Content -Path $tlog -Value "ERROR $($_.Exception.Message)" }
+    exit
+}
 
 # test hooks: drive the lobby headless (COOP_TEST_LOBBY=host|join:<code>, results to COOP_NO_GAME file)
 if ($env:COOP_TEST_LOBBY) {

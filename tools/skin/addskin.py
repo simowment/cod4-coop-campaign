@@ -1,15 +1,22 @@
 """One-step skin management (what the launcher's Skins tab runs).
 
-  python addskin.py add <model file> <name> [--flip] [--layers preset.json]
+  python addskin.py rigprep <model file> <out.json> [--flip auto|0|1] [--up auto|y|z]
+  python addskin.py add <model file> <name> [--rig <rig.json>] [--flip] [--layers preset.json]
   python addskin.py remove <name>
   python addskin.py list
 
-add:    rigged or not (auto-rig), GLB / glTF / DAE / OBJ / FBX (FBX needs Blender) -> converted onto the
-        CoD4 skeleton, preview at coop_skins/work/previews/<name>.png, skin pack rebuilt and installed
-remove: drops the skin from the pack and reinstalls
+rigprep: rigged model -> {"rigged": true}. Unrigged -> front view png (<out>.png, 512x512, the character's
+        LEFT on the image RIGHT) + json with the detected up axis / facing and 8 guessed markers in image
+        pixels (chin, groin, left/right wrist, elbow, knee) for the launcher's rig editor (like Mixamo).
+add:    rigged or not, GLB / glTF / DAE / OBJ / FBX (FBX needs Blender) -> converted onto the CoD4 skeleton,
+        preview at coop_skins/work/previews/<name>.png, skin pack rebuilt and installed. Unrigged models are
+        auto-rigged from the --rig json's markers (as placed by the user), else from guessed ones; --flip
+        forces a 180 deg turn. The rig used is kept in coop_skins/work/rigs/coop_<name>.json/.png.
+remove: drops the skin (and its rig) from the pack and reinstalls
 Progress goes to stdout line by line; the last line is "OK ..." or "ERROR ...".
 """
 import glob
+import json
 import os
 import shutil
 import sys
@@ -68,7 +75,89 @@ def remove_staged(model):
             os.remove(f)
 
 
+def rig_paths(model):
+    d = os.path.join(skinenv.WORK, 'rigs')
+    return os.path.join(d, model + '.json'), os.path.join(d, model + '.png')
+
+
+def remove_rig(model):
+    for f in rig_paths(model):
+        if os.path.isfile(f):
+            os.remove(f)
+
+
+def staged_files(model):
+    """every file of a staged skin (what remove_staged / remove_rig delete)"""
+    w = skinenv.WORK
+    name = model[len('coop_'):]
+    pats = [os.path.join(w, 'xmodel', model + '.*'), os.path.join(w, 'model_export', model + '.glb'),
+            os.path.join(w, 'materials', 'mc', 'mtl_coop_%s_*.json' % name), os.path.join(w, 'images', 'coop_%s_*_col.*' % name),
+            os.path.join(w, 'previews', model + '.png')]
+    return [f for p in pats for f in glob.glob(p)] + [f for f in rig_paths(model) if os.path.isfile(f)]
+
+
+def stash(model):
+    """move the old skin (and its rig) aside before re-adding it; -> (backup dir, [(moved, original)])"""
+    import tempfile
+    bak = tempfile.mkdtemp(prefix='coop_skin_bak_', dir=skinenv.WORK)
+    moved = []
+    for k, f in enumerate(staged_files(model)):
+        dst = os.path.join(bak, '%d_%s' % (k, os.path.basename(f)))
+        shutil.move(f, dst)
+        moved.append((dst, f))
+    return bak, moved
+
+
+def unstash(model, bak, moved, restore):
+    """put the old skin back (the new one failed: drop what it left half-written first) or drop the
+    backup (it worked)"""
+    if restore:
+        remove_staged(model)
+        remove_rig(model)
+        for dst, f in moved:
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            shutil.move(dst, f)
+    shutil.rmtree(bak, ignore_errors=True)
+
+
+def rigprep(args):
+    import argparse
+    ap = argparse.ArgumentParser(prog='addskin.py rigprep')
+    ap.add_argument('file')
+    ap.add_argument('json')
+    ap.add_argument('--flip', default='auto', choices=['auto', '0', '1'])
+    ap.add_argument('--up', default='auto', choices=['auto', 'y', 'z'])
+    a = ap.parse_args(args)
+    import rebind
+    src = os.path.abspath(a.file)
+    out = os.path.abspath(a.json)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    skinenv.say('reading %s ...' % os.path.basename(src))
+    ch = rebind.load_any(src)
+    if ch.rigged:
+        with open(out, 'w', encoding='utf-8') as f:
+            json.dump({'rigged': True, 'source': src}, f, indent=2)
+        print('OK rigged', flush=True)
+        print('OK rigprep %s' % out, flush=True)
+        return
+    import autorig
+    skinenv.say('no skeleton: guessing the rig markers ...')
+    autorig.rigprep(ch, src, out, up=a.up, flip=a.flip)
+    print('OK rigprep %s' % out, flush=True)
+
+
+def utf8_console():
+    """the launcher sends stdout to a file (cp1252 by default on Windows): a model named in Cyrillic or
+    CJK would end in UnicodeEncodeError. UTF-8 is what the launcher reads back"""
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            pass
+
+
 def main():
+    utf8_console()
     args = sys.argv[1:]
     if not args:
         print(__doc__)
@@ -79,22 +168,67 @@ def main():
             for m in staged():
                 print(m)
             return
+        if cmd == 'rigprep':
+            rigprep(args[1:])
+            return
         if cmd == 'add':
             import argparse
             ap = argparse.ArgumentParser()
             ap.add_argument('file')
             ap.add_argument('name')
             ap.add_argument('--flip', action='store_true')
+            ap.add_argument('--rig')
             ap.add_argument('--layers')
             a = ap.parse_args(args[1:])
             import rebind
             os.makedirs(os.path.join(skinenv.WORK, 'previews'), exist_ok=True)
             name = rebind.re.sub(r'[^a-z0-9_]', '_', a.name.lower()).strip('_') or 'skin'
             model = 'coop_' + name
-            remove_staged(model)
+            flip, up, markers, rig, rig_png = (True if a.flip else 'auto'), 'auto', None, None, None
+            if a.rig:   # read it first: it may be the very file in rigs/ that gets replaced below
+                import autorig
+                rig = autorig.load_rig(a.rig)
+                if not rig.get('rigged'):
+                    markers = autorig.markers_from_json(rig)
+                    up = rig.get('up', 'auto')
+                    # the markers were placed on the image of THIS facing: --flip cannot turn the model
+                    # under them (it would mirror them)
+                    flip = bool(rig.get('flip', False))
+                    if a.flip and not flip:
+                        skinenv.say('note: --flip ignored, the rig json sets the facing (turn it in the rig editor)')
+                    img = rig.get('image') or os.path.splitext(a.rig)[0] + '.png'
+                    if not os.path.isfile(img):
+                        img = os.path.splitext(a.rig)[0] + '.png'
+                    if os.path.isfile(img):
+                        with open(img, 'rb') as f:
+                            rig_png = f.read()
+                    skinenv.say('using the rig from %s' % os.path.basename(a.rig))
+                else:
+                    rig = None
             skinenv.say('converting %s ...' % os.path.basename(a.file))
             preview = os.path.join(skinenv.WORK, 'previews', model + '.png')
-            rebind.convert(a.file, name, out=skinenv.WORK, preview=preview, layers=a.layers, flip=a.flip)
+            rj, rp = rig_paths(model)
+            # the old skin and its rig are only moved aside: if this conversion fails they come back, so a
+            # failed "Edit rig" never loses the rig that worked
+            bak, moved = stash(model)
+            try:
+                # no front view to keep (the rig json's png is gone): convert writes a fresh one, with the
+                # markers used (the user's)
+                rebind.convert(a.file, name, out=skinenv.WORK, preview=preview, layers=a.layers, flip=flip, up=up,
+                               markers=markers, rig_out=None if (rig and rig_png is not None) else rj)
+                if rig and rig_png is not None:   # keep the user's rig (markers as placed) for "Edit rig"
+                    os.makedirs(os.path.dirname(rj), exist_ok=True)
+                    with open(rp, 'wb') as f:
+                        f.write(rig_png)
+                    rig['image'] = rp
+                    rig['source'] = os.path.abspath(a.file)
+                    rig['flip'] = bool(flip)
+                    with open(rj, 'w', encoding='utf-8') as f:
+                        json.dump(rig, f, indent=2)
+            except BaseException:
+                unstash(model, bak, moved, restore=True)
+                raise
+            unstash(model, bak, moved, restore=False)
             skinenv.say('building the skin pack ...')
             repack()
             print('OK %s preview=%s' % (model, preview), flush=True)
@@ -102,6 +236,7 @@ def main():
         if cmd == 'remove':
             model = args[1] if args[1].startswith('coop_') else 'coop_' + args[1]
             remove_staged(model)
+            remove_rig(model)
             repack()
             print('OK removed %s' % model, flush=True)
             return

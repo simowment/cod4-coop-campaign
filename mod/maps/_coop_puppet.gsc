@@ -25,6 +25,7 @@ puppet_precache()
 	c.skins = [];
 	c.my_skin = valid_skin( getdvar( "coop_myskin" ) );
 	c.bot_skin = valid_skin( getdvar( "coop_botskin" ) );
+	maps\_coop::log( "skin: pack has " + c.skin_list.size + ", mine '" + getdvar( "coop_myskin" ) + "' -> '" + c.my_skin + "'" );
 }
 
 init()
@@ -693,7 +694,15 @@ ev_skin( slot, tok )
 	if ( tok.size < 3 )
 		return;
 	// a skin this game does not have in its pack falls back to the normal soldier
-	level.coop.skins[ slot ] = valid_skin( tok[ 2 ] );
+	skin = valid_skin( tok[ 2 ] );
+	if ( !isdefined( level.coop.skins[ slot ] ) || level.coop.skins[ slot ] != skin )
+	{
+		note = "";
+		if ( skin == "" && tok[ 2 ] != "-" )
+			note = " (not in my skin pack: default soldier)";
+		maps\_coop::log( "skin: slot " + slot + " wears '" + tok[ 2 ] + "'" + note );
+	}
+	level.coop.skins[ slot ] = skin;
 }
 
 announce_skin()

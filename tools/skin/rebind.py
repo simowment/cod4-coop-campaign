@@ -265,10 +265,13 @@ def load_dae(path):
         return M
     world = {}
     key_name = {}
+    static = []     # (world matrix, instance_geometry) for models without a skin controller
 
     def walk(nd, parentM, parent_joint):
         M = parentM @ node_mat(nd)
         pj = parent_joint
+        for ig in nd.findall(q('instance_geometry')):
+            static.append((M, ig))
         if nd.get('type') == 'JOINT':
             nm = nd.get('name') or nd.get('id')
             world[nm] = M
@@ -285,6 +288,53 @@ def load_dae(path):
             walk(nd, np.eye(4), None)
     for nm in c.bones:
         c.bind[nm] = world[nm]
+
+    def add_mesh(mesh, P, inst, infl=None):
+        """the triangles of a <mesh> (positions P already placed) -> prims; infl = per-position
+        [(joint, weight)] for a skinned mesh, None for a static one"""
+        mat_bind = {im.get('symbol'): im.get('target').lstrip('#') for im in inst.iter(q('instance_material'))}
+        for tri in list(mesh.findall(q('triangles'))) + list(mesh.findall(q('polylist'))):
+            inputs = tri.findall(q('input'))
+            nst = max(int(i.get('offset')) for i in inputs) + 1
+            voff = next(int(i.get('offset')) for i in inputs if i.get('semantic') == 'VERTEX')
+            tin = next((i for i in inputs if i.get('semantic') == 'TEXCOORD' and i.get('set', '0') == '0'), None)
+            T = floats(ref(tin.get('source')).find(q('float_array'))).reshape(-1, 2) if tin is not None else None
+            toff = int(tin.get('offset')) if tin is not None else voff
+            pel = tri.find(q('p'))
+            if pel is None or not pel.text:
+                continue
+            idx = np.array([int(x) for x in pel.text.split()]).reshape(-1, nst)
+            if tri.tag.endswith('polylist'):
+                if any(int(x) != 3 for x in tri.find(q('vcount')).text.split()):
+                    sys.exit('polylist with non-triangle faces: triangulate the model first')
+            pairs = np.c_[idx[:, voff], idx[:, toff]]
+            uniq, first, inv = np.unique(pairs, axis=0, return_index=True, return_inverse=True)
+            sets = []
+            for i in sorted((i for i in inputs if i.get('semantic') == 'TEXCOORD'), key=lambda i: int(i.get('set', '0'))):
+                Ts = floats(ref(i.get('source')).find(q('float_array'))).reshape(-1, 2)
+                sets.append(Ts[idx[first, int(i.get('offset'))]])
+            vi, ti = uniq[:, 0], uniq[:, 1]
+            pos = P[vi]
+            uv = (T[ti] * np.array([1, -1]) + np.array([0, 1])) if T is not None else np.zeros((len(vi), 2))  # DAE v up -> glTF v down
+            matid = mat_bind.get(tri.get('material'), tri.get('material'))
+            imfile = mat_img.get(matid)
+            image = Image.open(os.path.join(base, imfile)) if imfile and os.path.isfile(os.path.join(base, imfile)) else None
+            pr = {'pos': pos, 'uv': uv, 'tris': np.asarray(inv).reshape(-1, 3), 'image': image, 'mat': matid, 'uvsets': sets,
+                  'dir': base}
+            if infl is not None:
+                jn = []
+                W = np.zeros((len(vi), 4))
+                for k, src in enumerate(vi):
+                    lst = sorted(infl[src], key=lambda t: -t[1])[:4]
+                    jn.append([n for n, _ in lst] + [lst[0][0]] * (4 - len(lst)))
+                    for m, (_, w) in enumerate(lst):
+                        W[k, m] = w
+                pr['jn'], pr['w'] = jn, W
+            c.prims.append(pr)
+
+    def positions(mesh):
+        possrc = next(ref(i.get('source')) for i in mesh.find(q('vertices')).findall(q('input')) if i.get('semantic') == 'POSITION')
+        return floats(possrc.find(q('float_array'))).reshape(-1, 3)
     for ic in root.iter(q('instance_controller')):
         skin = ref(ic.get('url')).find(q('skin'))
         bsm_el = skin.find(q('bind_shape_matrix'))
@@ -325,44 +375,24 @@ def load_dae(path):
                 o += ninp
             infl.append(lst)
         mesh = ref(skin.get('source')).find(q('mesh'))
-        possrc = next(ref(i.get('source')) for i in mesh.find(q('vertices')).findall(q('input')) if i.get('semantic') == 'POSITION')
-        P = floats(possrc.find(q('float_array'))).reshape(-1, 3)
+        P = positions(mesh)
         P = (bsm @ np.c_[P, np.ones(len(P))].T).T[:, :3]
-        mat_bind = {im.get('symbol'): im.get('target').lstrip('#') for im in ic.iter(q('instance_material'))}
-        for tri in list(mesh.findall(q('triangles'))) + list(mesh.findall(q('polylist'))):
-            inputs = tri.findall(q('input'))
-            nst = max(int(i.get('offset')) for i in inputs) + 1
-            voff = next(int(i.get('offset')) for i in inputs if i.get('semantic') == 'VERTEX')
-            tin = next((i for i in inputs if i.get('semantic') == 'TEXCOORD' and i.get('set', '0') == '0'), None)
-            T = floats(ref(tin.get('source')).find(q('float_array'))).reshape(-1, 2) if tin is not None else None
-            toff = int(tin.get('offset')) if tin is not None else voff
-            idx = np.array([int(x) for x in tri.find(q('p')).text.split()]).reshape(-1, nst)
-            if tri.tag.endswith('polylist'):
-                if any(int(x) != 3 for x in tri.find(q('vcount')).text.split()):
-                    sys.exit('polylist with non-triangle faces: triangulate the model first')
-            pairs = np.c_[idx[:, voff], idx[:, toff]]
-            uniq, first, inv = np.unique(pairs, axis=0, return_index=True, return_inverse=True)
-            sets = []
-            for i in sorted((i for i in inputs if i.get('semantic') == 'TEXCOORD'), key=lambda i: int(i.get('set', '0'))):
-                Ts = floats(ref(i.get('source')).find(q('float_array'))).reshape(-1, 2)
-                sets.append(Ts[idx[first, int(i.get('offset'))]])
-            vi, ti = uniq[:, 0], uniq[:, 1]
-            pos = P[vi]
-            uv = (T[ti] * np.array([1, -1]) + np.array([0, 1])) if T is not None else np.zeros((len(vi), 2))  # DAE v up -> glTF v down
-            jn = []
-            W = np.zeros((len(vi), 4))
-            for k, src in enumerate(vi):
-                lst = sorted(infl[src], key=lambda t: -t[1])[:4]
-                jn.append([n for n, _ in lst] + [lst[0][0]] * (4 - len(lst)))
-                for m, (_, w) in enumerate(lst):
-                    W[k, m] = w
-            matid = mat_bind.get(tri.get('material'), tri.get('material'))
-            imfile = mat_img.get(matid)
-            image = Image.open(os.path.join(base, imfile)) if imfile and os.path.isfile(os.path.join(base, imfile)) else None
-            c.prims.append({'pos': pos, 'uv': uv, 'jn': jn, 'w': W, 'tris': np.asarray(inv).reshape(-1, 3), 'image': image,
-                            'mat': matid, 'uvsets': sets, 'dir': base})
+        add_mesh(mesh, P, ic, infl)
     if not c.prims:
-        sys.exit('no skinned mesh in %s (the model needs a rig: see Mesh2Motion for unrigged models)' % path)
+        # no skin: the plain meshes placed in the scene (world space), for autorig.py
+        for M, ig in static:
+            geo = ref(ig.get('url'))
+            mesh = geo.find(q('mesh')) if geo is not None else None
+            if mesh is None or mesh.find(q('vertices')) is None:
+                continue
+            P = positions(mesh)
+            P = (M @ np.c_[P, np.ones(len(P))].T).T[:, :3]
+            add_mesh(mesh, P, ig)
+        c.prims = [pr for pr in c.prims if len(pr['tris'])]
+        if not c.prims:
+            sys.exit('no mesh found in %s' % path)
+        c.bones, c.parent, c.bind = [], {}, {}
+        c.rigged = False
     return c
 
 
@@ -607,13 +637,30 @@ def main():
     ap.add_argument('--keep-weapons', action='store_true')
     ap.add_argument('--preview', help='also render a front/side preview png next to the stock soldier')
     ap.add_argument('--layers', help='json describing layered materials to bake (see tools/skin/presets)')
-    ap.add_argument('--flip', action='store_true', help='auto-rig only: the model faces away (-Z)')
+    ap.add_argument('--flip', action='store_true', help='auto-rig only: turn the model 180 deg (default: detected)')
+    ap.add_argument('--up', default='auto', help='auto-rig only: auto | y | z')
+    ap.add_argument('--rig', help='auto-rig only: rig json from "addskin.py rigprep" (markers, up, facing)')
     a = ap.parse_args()
+    for s in (sys.stdout, sys.stderr):     # model names in any script, also when stdout is a file
+        try:
+            s.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            pass
+    flip, up, markers = (True if a.flip else 'auto'), a.up, None
+    if a.rig:
+        from autorig import markers_from_json, load_rig
+        d = load_rig(a.rig)
+        # the markers belong to the facing the json was made with: --flip cannot change it
+        flip, up, markers = d.get('flip', 'auto'), d.get('up', up), markers_from_json(d)
     convert(a.character, a.name, out=a.out, cod=a.cod, keep_weapons=a.keep_weapons, preview=a.preview,
-            layers=a.layers, flip=a.flip)
+            layers=a.layers, flip=flip, up=up, markers=markers)
 
 
-def convert(character, name, out=None, cod=DEFAULT_COD, keep_weapons=False, preview=None, layers=None, flip=False):
+def convert(character, name, out=None, cod=DEFAULT_COD, keep_weapons=False, preview=None, layers=None, flip='auto',
+            up='auto', markers=None, rig_out=None):
+    """flip / up / markers only matter for models without a skeleton (see autorig.py): flip 'auto' | True |
+    False, up 'auto' | 'y' | 'z', markers {name: (X, Y)} in the turned space; rig_out = also write the rig
+    json + front view png used (so the rig can be edited later)"""
     from types import SimpleNamespace
     a = SimpleNamespace(character=character, cod=cod, keep_weapons=keep_weapons, preview=preview, layers=layers)
     name = re.sub(r'[^a-z0-9_]', '_', name.lower())
@@ -621,12 +668,16 @@ def convert(character, name, out=None, cod=DEFAULT_COD, keep_weapons=False, prev
     out = os.path.abspath(out or skinenv.WORK)
     ch = load_any(character)
     if not ch.rigged:
-        from autorig import autorig
-        autorig(ch, flip=flip)
+        from autorig import autorig, write_rig
+        info = autorig(ch, flip=flip, up=up, markers=markers)
+        if rig_out:
+            os.makedirs(os.path.dirname(os.path.abspath(rig_out)), exist_ok=True)
+            write_rig(ch, info, rig_out, character)
         print('no skeleton found: auto-rigged it (%d bones)' % len(ch.bones))
 
     if a.layers:
-        bake_layers(ch, json.load(open(a.layers)))
+        with open(a.layers, encoding='utf-8-sig') as f:
+            bake_layers(ch, json.load(f))
 
     cod = Gltf(a.cod)
     cskin = cod.j['skins'][0]

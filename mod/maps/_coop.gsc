@@ -217,6 +217,13 @@ test_command()
 		else
 			log( "test kill: no axis with an id (" + ai.size + " axis alive)" );
 	}
+	else if ( v == "tpstall" )
+	{
+		s = getent( "rifleTraining_stall", "targetname" );
+		if ( isdefined( s ) )
+			level.player setorigin( s.origin );
+		log( "test tpstall " + isdefined( s ) );
+	}
 	else if ( v == "targets" || v == "targetstate" || v == "hittarget" )
 	{
 		// killhouse shared range tests: raise every rifle target / log how many are up / hit one as the player

@@ -45,9 +45,13 @@ When friends join your lobby (or your running game), their launcher downloads yo
 automatically, so everyone has the same skins.
 
 **Adding skins from the launcher:** open the **Skins** tab, click **Add character…** and pick a GLB, glTF, DAE,
-OBJ or FBX file (FBX needs Blender). Models without a skeleton are **rigged automatically**: they should stand
-in a T- or A-pose, and if one comes out facing the wrong way, re-add it with **"Character walks backwards: turn it around"** ticked. The tab shows a preview, and
-**Remove** drops a skin. It needs Python 3 with `numpy` and `pillow`. On first use it downloads
+OBJ or FBX file (FBX needs Blender). Models with a skeleton are added straight away. Models without one
+(they should stand in a T- or A-pose) open a **rig editor**, much like Mixamo's: a front view of the character
+with eight markers (chin, groin, wrists, elbows, knees) already placed by a guess. Drag any marker that is off
+(with **Symmetry** on, the other side follows), use **Turn around** if you see the character's back (markers
+you already moved turn with it), or **Swap up axis** if it is lying on its back or front (this re-guesses all
+markers; an upside-down model is not handled), then click **Rig it** (or press Enter). **Edit rig…** reopens the editor for an added
+skin later, with your markers, and re-rigs it. The tab shows a preview, and **Remove** drops a skin. It needs Python 3 with `numpy` and `pillow`. On first use it downloads
 OpenAssetTools and reads the soldier skeleton from your own game files. Everything lives in `coop_skins/`
 next to the game.
 
@@ -56,6 +60,8 @@ From the command line (same tool):
 ```bash
 python tools/skin/addskin.py add path/to/character.glb mychar
 python tools/skin/addskin.py remove mychar
+python tools/skin/addskin.py rigprep path/to/character.glb rig.json   # front view + guessed markers
+python tools/skin/addskin.py add path/to/character.glb mychar --rig rig.json
 ```
 
 `rebind.py` finds each bone's role (pelvis, spine, arms, legs and fingers) from its name and the hierarchy, so

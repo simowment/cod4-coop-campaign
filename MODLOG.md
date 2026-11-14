@@ -153,3 +153,49 @@ Setup: Virtual Display Driver 25.7.23 (monitor at x=1920), `tools/bg.ps1` (allow
   embedded: ship images/<name>.iwi loose next to mod.ff (build.py does).
 - Game: +set coop_skin coop_<name> precaches the model and dresses every squadmate puppet with it.
 - Verified: Draven (League rig, 80 bones) in killhouse, every pose renders textured and animated.
+
+## Mixamo-style auto-rig (2026-11-14)
+- `tools/skin/autorig.py` rewritten: ONE skeleton builder driven by 8 markers on a front view (chin, groin,
+  wrists, elbows, knees) like Mixamo. Markers come from the launcher's rig editor or are guessed from the
+  mesh (silhouette + rays along Z): crotch = top of the leg gap measured by solid thickness (tabards /
+  loincloths do not hide it), armpits = where the torso edge falls back from the arm, wrist = first clear
+  thickening along the arm (hand / glove), chin = where the head narrows into the neck or bursts into
+  shoulders, knees from crotch + ankle. Joint depth = middle of the ray's solid interval nearest the parent.
+- Up axis = longer of Y/Z; facing = feet stick out in front of the shins (head shape was tried: unreliable).
+- Weights: distance to bone segments x soft region gates (arms beyond the shoulder plane, legs below the hips
+  per side, head zone), arm-vs-leg competition, Laplacian smoothing on the position-welded mesh (no seam
+  splits), loose parts rigid (small body parts -> owning bone, props off the body e.g. Draven's axes ->
+  nearest bone). Loose "core" = biggest part + touching parts, so floating props never fool the markers.
+- `addskin.py rigprep <file> <json> [--flip auto|0|1] [--up auto|y|z]` -> 512px front png + json (view,
+  pixel markers, image right = character's left); `add --rig <json>`; rig kept in work/rigs/coop_<name>.*;
+  `remove` deletes it. `rebind.convert(..., flip='auto', up='auto', markers=None, rig_out=None)`.
+- Tested (unrigged copies of draven.glb / Luigi pc02_m4.dae, also turned 180 and Z-up: all 8 orientations
+  detected right): auto markers within 0.5-1.4% of height except Draven knees ~6% / groin 3.5%; posed test
+  (arms -50 deg, elbows/knees 60 deg) max edge growth ~2% of height, no tearing.
+
+## Auto-rig review fixes (2026-11-14)
+- Core / floor: floor and height come from the body only (stray vertices and a disc below the feet no
+  longer zero the facing score); main part = tallest big part (a single-sided skirt can out-count a low-poly
+  body); a long prop gripped in a hand (sticks out of the body box, touches only out to the side or hangs
+  below the feet not from its top) is left out. Front view is framed on the body (Draven 290 -> ~470 px).
+- Rays: one grid-accelerated caster; entries/exits paired by winding (outward normals from the signed
+  volume), a container dropped only for a thick inner piece (skirt around a leg) not for an armour plate
+  sunk into the thigh; relative epsilon (works at 1e-4 scale). `_solid` also needs the middle to be inside
+  (6 axis rays, 5 must exit): an open coat/skirt between the legs is not solid. Facing score takes the shin
+  middle from solid rays. Single-sided skirt: Luigi groin 12.6 -> 1.4% H, leg depths 8.6 -> 1.2% H.
+- Knee guess from the leg profile (narrow part between thigh and calf/boot top), ratio only for a plain tube:
+  Draven knees 6.1 -> 0.3/0.8% H, Luigi unchanged 0.7%.
+- Shoulder height = chin-based height corrected +-5% of the torso by the silhouette arm axis: moving the
+  elbow marker 5% H moves the shoulder 1% (was 3.6%).
+- Loose parts: groups of touching parts get weights solved over the contact chain (body contacts as fixed
+  values): Draven belt rings stay on their clasps (det: 3.8 -> 1.4% H, rest is the thigh contact). Leg gate
+  centre band halved (Lknee-only crosstalk Draven 1.36 -> 0.98% H, Luigi 0.58 -> 0).
+- L/R swapped markers are swapped back with a WARNING line. Mesh built once (turned copy for the flip);
+  components / contacts / smoothing without np.*.at: 656k tris rigprep ~12 s (was ~17 s).
+- rebind.load_dae loads unrigged Collada (instance_geometry, world space) for the auto-rig.
+- addskin/rebind: stdout/stderr UTF-8 (Cyrillic/CJK names), rig json read as utf-8-sig and written ASCII.
+  `add` moves the old skin + rig aside and restores them if the conversion fails. With --rig the json's
+  facing wins over --flip (the markers belong to that image); a missing rig png is re-rendered.
+- flip_auto stays "the facing the detector picks" (the launcher shows "set by you" when flip differs).
+- Arms hanging > ~60 deg below horizontal still need the markers checked (reviewer's "A-pose 30 deg" test
+  was Draven's 37 deg A-pose rotated 30 more = 67 deg; real T->A poses up to 60 deg are 1-5% H on Luigi).
