@@ -442,10 +442,93 @@ start_camera( st )
 	look = st.origin + ( 0, 0, 38 );
 	cam = spawn( "script_model", campos - ( 0, 0, eye_h ) );
 	cam setmodel( "tag_origin" );
-	cam.angles = vectortoangles( look - campos );
-	p playerlinktoabsolute( cam, "tag_origin" );
+	cam.angles = ( 0, 0, 0 ); // fixed: the player's own look decides where the camera orbits to
+	// free look while linked (0 = the view does not follow the tag; arcs cover all around but the back seam)
+	p playerlinkto( cam, "tag_origin", 0, 180, 180, 75, 75 );
+	p setplayerangles( vectortoangles( look - campos ) );
+	st.cam_center = look;
+	st.cam_dist = distance( look, campos );
+	st.cam_eye = eye_h;
 	hud_off();
+	p thread orbit_camera( st, cam );
 	return cam;
+}
+
+// the camera circles the avatar: it sits behind the view direction, looking at the avatar, and is pulled
+// in when a wall is in the way (the player only turns the view; the emote's own cancel keys still apply)
+orbit_camera( st, cam )
+{
+	self endon( "death" );
+	c = level.coop;
+	for ( ;; )
+	{
+		wait 0.05;
+		if ( !isdefined( c.emote ) || c.emote != st || !isdefined( cam ) )
+			return;
+		ang = self getplayerangles();
+		// at most 20 degrees per update (400/s): a flick cannot jump the camera past a wall it should stop at
+		if ( isdefined( st.cam_good_ang ) )
+		{
+			dy = maps\_coop_puppet::angle180( ang[ 1 ] - st.cam_good_ang[ 1 ] );
+			dp = ang[ 0 ] - st.cam_good_ang[ 0 ];
+			if ( dy > 20 || dy < -20 || dp > 20 || dp < -20 )
+			{
+				if ( dy > 20 )
+					dy = 20;
+				else if ( dy < -20 )
+					dy = -20;
+				if ( dp > 20 )
+					dp = 20;
+				else if ( dp < -20 )
+					dp = -20;
+				ang = ( st.cam_good_ang[ 0 ] + dp, st.cam_good_ang[ 1 ] + dy, 0 );
+				self setplayerangles( ang );
+			}
+		}
+		pitch = ang[ 0 ];
+		if ( pitch > 60 )
+			pitch = 60;
+		else if ( pitch < -35 )
+			pitch = -35;
+		dir = anglestoforward( ( pitch, ang[ 1 ], 0 ) );
+		// spring arm: the eye stays on the line back from the pivot (the avatar's chest) along the view, so
+		// the view always points at the avatar; the arm only gets shorter when something is in the way
+		pivot = st.cam_center;
+		want = pivot - vectorscale( dir, st.cam_dist );
+		f = 1.0;
+		tr = bullettrace( pivot, want, false, st.avatar ); // sight
+		if ( tr[ "fraction" ] < f )
+			f = tr[ "fraction" ];
+		// the player's own box swept at floor level along the same direction: stops at every wall the player
+		// cannot walk through, including thin tarp and plywood walls that sight traces pass
+		base = st.origin + ( 0, 0, 8 );
+		flat = base - vectorscale( vectornormalize( ( dir[ 0 ], dir[ 1 ], 0 ) ), st.cam_dist * length( ( dir[ 0 ], dir[ 1 ], 0 ) ) );
+		full = distance( base, flat );
+		if ( full > 1 )
+		{
+			hf = distance( base, playerphysicstrace( base, flat ) ) / full;
+			if ( hf < f )
+				f = hf;
+		}
+		d = st.cam_dist * f - 10; // keep the lens off the wall
+		if ( d < 30 )
+		{
+			// no room on this side (avatar against a wall): the camera stops there, and so does the view, so
+			// the avatar stays in frame - turn back the other way to keep orbiting
+			if ( isdefined( st.cam_good_ang ) )
+				self setplayerangles( st.cam_good_ang );
+			continue;
+		}
+		st.cam_good_ang = ang;
+		eye = pivot - vectorscale( dir, d );
+		if ( eye[ 2 ] < st.origin[ 2 ] + 16 )
+			eye = ( eye[ 0 ], eye[ 1 ], st.origin[ 2 ] + 16 ); // never under the floor
+		org = eye - ( 0, 0, st.cam_eye );
+		st.cam_got = d;
+		if ( getdvar( "coop_emote_camlog" ) == "1" )
+			maps\_coop::log( "orbit yaw " + ang[ 1 ] + " f " + f + " d " + d + " eye " + eye + " cam " + cam.origin );
+		cam.origin = org; // set, not moveto: overlapping 0.05 s moves overshoot and push it through walls
+	}
 }
 
 // the player HUD (compass, ammo, stance, action slots) would be drawn over the third-person view
@@ -559,7 +642,7 @@ watch_cancel( st )
 		reason = undefined;
 		if ( !isalive( self ) )
 			reason = "death";
-		else if ( isdefined( st.cam ) && distance( self.origin, st.cam.origin ) > 16 )
+		else if ( isdefined( st.cam ) && distance( self.origin, st.cam.origin ) > 64 )
 			reason = "scene"; // the level linked or moved the player itself: leave it there
 		else if ( c.down )
 			reason = "down";
@@ -616,7 +699,7 @@ stop_emote( reason )
 	if ( isdefined( st.cam ) )
 	{
 		// only undo our own link: if the level took the player meanwhile (scene, rig) it keeps them
-		on_cam = distance( p.origin, st.cam.origin ) <= 16;
+		on_cam = distance( p.origin, st.cam.origin ) <= 64;
 		if ( on_cam )
 		{
 			p unlink();
@@ -751,6 +834,15 @@ test_emote( arg )
 	if ( arg == "stop" )
 	{
 		stop_emote( "test" );
+		return;
+	}
+	if ( getsubstr( arg, 0, 4 ) == "cam " )
+	{
+		// turn the view by N degrees (as the mouse would) to orbit the emote camera
+		a = level.player getplayerangles();
+		level.player setplayerangles( ( a[ 0 ], a[ 1 ] + int( getsubstr( arg, 4, arg.size ) ), 0 ) );
+		if ( isdefined( level.coop.emote ) && isdefined( level.coop.emote.cam ) )
+			maps\_coop::log( "test emote cam yaw " + level.player getplayerangles()[ 1 ] + " cam at " + level.coop.emote.cam.origin + " centre " + level.coop.emote.cam_center + " dist " + level.coop.emote.cam_got + " eye " + level.player geteye() + " facing " + vectordot( anglestoforward( level.player getplayerangles() ), vectornormalize( level.coop.emote.cam_center - level.player geteye() ) ) );
 		return;
 	}
 	if ( arg == "view" )
