@@ -115,6 +115,21 @@ static s32 WINAPI hk_SCPresent(void *self, const void *src, const void *dst, voi
 	return real_SCPresent(self, src, dst, hwnd, dirty, flags);
 }
 
+/* Alt+F4 / the window's close button: CoD4 eats WM_SYSKEYDOWN, so neither reaches DefWindowProc and the
+   game ignores them. The game window only gets these while it has focus, and "quit" is the game's own
+   clean exit (config saved, network shut down). */
+static void *g_gameWnd, *g_gameOldProc;
+static s32 WINAPI game_wndproc(void *h, u32 msg, u32 wp, s32 lp)
+{
+	if ((msg == 0x0104 /* WM_SYSKEYDOWN */ && wp == 0x73 /* VK_F4 */ && (lp & (1 << 29)) /* Alt held */)
+	    || msg == 0x0010 /* WM_CLOSE */) {
+		logf("proxy: Alt+F4 / close: quitting");
+		cbuf_add_text("quit\n");
+		return 0;
+	}
+	return CallWindowProcA(g_gameOldProc, h, msg, wp, lp);
+}
+
 static s32 WINAPI hk_CreateDevice(void *self, u32 adapter, u32 type, void *hwnd, u32 flags, void *pp, void **out)
 {
 	s32 hr = real_CreateDevice(self, adapter, type, hwnd, flags, pp, out);
@@ -122,6 +137,10 @@ static s32 WINAPI hk_CreateDevice(void *self, u32 adapter, u32 type, void *hwnd,
 		void **vt = *(void ***)*out;
 		g_device = *out;
 		devmode_on_device(*out, hwnd);
+		if (!g_devmode && hwnd && hwnd != g_gameWnd) { /* devmode subclasses the window itself */
+			g_gameWnd = hwnd;
+			g_gameOldProc = (void *)SetWindowLongA(hwnd, -4 /* GWL_WNDPROC */, (s32)game_wndproc);
+		}
 		if (patch_vtable(vt, 17, (void *)hk_Present, (void **)&real_Present)) logf("proxy: device Present hooked");
 		/* IDirect3DDevice9::GetSwapChain is vtable 14; IDirect3DSwapChain9::Present is 3, Release is 2 */
 		typedef s32 (WINAPI *GetSwapChain_t)(void *, u32, void **);

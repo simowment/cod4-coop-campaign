@@ -36,6 +36,8 @@ DLLIMPORT BOOL WINAPI QueryPerformanceFrequency(s64 *);
 DLLIMPORT u32 WINAPI GetTickCount(void);
 DLLIMPORT void WINAPI OutputDebugStringA(const char *);
 DLLIMPORT int WINAPI MessageBoxA(void *, const char *, const char *, u32);
+DLLIMPORT s32 WINAPI SetWindowLongA(void *, int, s32);
+DLLIMPORT s32 WINAPI CallWindowProcA(void *, void *, u32, u32, s32);
 
 #define INVALID_HANDLE_VALUE ((HANDLE)(s32)-1)
 

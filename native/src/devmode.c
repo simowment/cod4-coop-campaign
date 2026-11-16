@@ -17,8 +17,6 @@ DLLIMPORT void *WINAPI GetForegroundWindow(void);
 DLLIMPORT BOOL WINAPI SetForegroundWindow(void *);
 DLLIMPORT BOOL WINAPI SetWindowPos(void *, void *, int, int, int, int, u32);
 DLLIMPORT BOOL WINAPI IsWindow(void *);
-DLLIMPORT s32 WINAPI SetWindowLongA(void *, int, s32);
-DLLIMPORT s32 WINAPI CallWindowProcA(void *, void *, u32, u32, s32);
 static void *g_oldProc;
 DLLIMPORT BOOL WINAPI PostMessageA(void *, u32, u32, s32);
 DLLIMPORT HANDLE WINAPI CreateThread(void *, u32, void *, void *, u32, u32 *);

@@ -221,17 +221,20 @@ wait_key_up( w )
 // the centre along (no need to turn back a long way)
 update_cursor( w )
 {
-	cur = level.player getplayerangles();
-	x = maps\_coop_puppet::angle180( w.base[ 1 ] - cur[ 1 ] ); // right
-	y = w.base[ 0 ] - cur[ 0 ]; // up
+	p = level.player;
+	cur = p getplayerangles();
+	dx = maps\_coop_puppet::angle180( w.base[ 1 ] - cur[ 1 ] ); // right
+	dy = w.base[ 0 ] - cur[ 0 ]; // up
+	if ( dx != 0 || dy != 0 )
+		p setplayerangles( w.base ); // the view stays where the wheel opened; the mouse only moves the cursor
+	x = w.cx + dx;
+	y = w.cy + dy;
 	len = length( ( x, y, 0 ) );
 	maxr = 14;
 	if ( len > maxr )
 	{
-		s = maxr / len;
-		x = x * s;
-		y = y * s;
-		w.base = ( cur[ 0 ] + y, cur[ 1 ] + x, 0 );
+		x = x * maxr / len;
+		y = y * maxr / len;
 		len = maxr;
 	}
 	w.cx = x;
@@ -343,7 +346,7 @@ play_emote( id, angles )
 	st.avatar = spawn_avatar( st.origin, st.angles[ 1 ], weapon );
 	if ( isdefined( st.avatar ) )
 	{
-		st.avatar thread play_sequence( e, e.dur_ms );
+		st.avatar thread play_sequence( e, e.dur_ms, true );
 		st.cam = start_camera( st );
 	}
 	maps\_coop::send( "EM|" + id + "|" + e.dur_ms );
@@ -465,12 +468,21 @@ hud_on()
 }
 
 // on the avatar (local) or a puppet (remote): play the emote's anims in turn for dur ms
-play_sequence( e, dur )
+play_sequence( e, dur, is_local )
 {
 	self endon( "death" );
 	self endon( "coop_emote_end" );
 	if ( isdefined( e.snd ) )
-		self playsound( e.snd );
+	{
+		// a "_music" alias is a streamed song: playsound could not stop it, so it is real music, local only
+		if ( !is_music( e.snd ) )
+			self playsound( e.snd );
+		else if ( isdefined( is_local ) )
+		{
+			musicplay( e.snd );
+			level.coop.emote_music = true;
+		}
+	}
 	t_end = gettime() + dur;
 	for ( i = 0; gettime() < t_end; i++ )
 	{
@@ -588,6 +600,11 @@ stop_emote( reason )
 	{
 		st.avatar notify( "coop_emote_end" );
 		st.avatar stopsounds();
+		if ( isdefined( level.coop.emote_music ) )
+		{
+			musicstop( 0.5 );
+			level.coop.emote_music = undefined;
+		}
 		st.avatar delete();
 	}
 	weapons_on();
@@ -655,7 +672,7 @@ puppet_emote_start( id, dur )
 	e = level.coop.emotes[ id ];
 	self puppet_emote_stop();
 	self.coop_emote_until = gettime() + dur;
-	if ( isdefined( e.snd ) )
+	if ( isdefined( e.snd ) && !is_music( e.snd ) )
 		self.coop_emote_snd = true;
 	self thread play_sequence( e, dur );
 }
@@ -782,4 +799,10 @@ test_bot_emote( arg )
 	if ( isdefined( pp ) )
 		level.player setplayerangles( vectortoangles( pp.origin + ( 0, 0, 40 ) - level.player geteye() ) );
 	maps\_coop::log( "test bot emote slot " + s + " id " + id + " puppet " + isdefined( pp ) );
+}
+
+is_music( alias )
+{
+	n = alias.size;
+	return n > 6 && getsubstr( alias, n - 6, n ) == "_music";
 }
