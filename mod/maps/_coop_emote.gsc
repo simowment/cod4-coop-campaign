@@ -17,7 +17,9 @@
 // and the player view is linked to a camera (iw3sp has no cg_thirdperson). Moving, jumping, firing, aim,
 // melee, grenades, damage, going down, death, level end and the emote key all cancel it; the player is
 // put back exactly where they stood. Squadmates see the same emote on your puppet ("EM|id|ms", "EM|-1").
-// Every anim and sound used here is in common.ff, so it works in every level.
+// Every anim and sound used here is in common.ff, so it works in every level. Custom emotes (dances made
+// with tools/skin/addemote.py) come from the pack's mod.ff, which is loaded in every level too; they are
+// listed by the generated maps\_coop_emotes.gsc and take the wheel's last slices.
 
 #include maps\_utility;
 #include common_scripts\utility;
@@ -36,6 +38,13 @@ init()
 	add_emote( "Dance",       1.7,  11000,   "cheat_chaplin_music",         %casual_stand_v2_twitch_shift, %patrolstand_twitch, %casual_stand_v2_twitch_talk, %patrolstand_look );
 	add_emote( "Take a Knee", 1.0,  8000,    undefined,                     %casual_crouch_idle );
 	add_emote( "Play Dead",   1.0,  7000,    undefined,                     %death_stand_dropinplace );
+	// custom emotes of the pack (ids 8+), shown on the wheel's last slices: custom 1 on slice 8, 2 on 7...
+	maps\_coop_emotes::add_all();
+	c.wheel_ids = [];
+	for ( i = 0; i < 8; i++ )
+		c.wheel_ids[ i ] = i;
+	for ( k = 0; k < 4 && 8 + k < c.emotes.size; k++ )
+		c.wheel_ids[ 7 - k ] = 8 + k;
 	c.emote = undefined; // struct while the local player is emoting
 	c.wheel = undefined; // struct while the wheel is open
 	c.emote_seq = 0;
@@ -75,6 +84,15 @@ add_emote( name, rate, hold, snd, a0, a1, a2, a3 )
 	if ( hold > e.dur_ms )
 		e.dur_ms = hold; // looping (or last-frame holding) emotes last this long
 	level.coop.emotes[ level.coop.emotes.size ] = e;
+}
+
+// a custom emote from the pack (maps\_coop_emotes, generated): one xanim on a free generic_human node,
+// looping by itself for hold ms, with its own song (a "_music" alias: local only, stopped with the emote).
+// Played without the gun in hand.
+add_custom( name, hold, snd, a0 )
+{
+	add_emote( name, 1.0, hold, snd, a0 );
+	level.coop.emotes[ level.coop.emotes.size - 1 ].nogun = true;
 }
 
 // key names only: letters, digits, F-keys, MOUSE4... (the dvar ends up in a console command)
@@ -265,8 +283,8 @@ close_wheel( sel )
 	maps\_coop_emote_hud::hide();
 	if ( getdvar( "coop_debug" ) == "1" )
 		maps\_coop::log( "emote wheel close, pick " + sel + " key up " + isdefined( w.released ) );
-	if ( isdefined( sel ) && sel >= 0 && isdefined( c.emotes[ sel ] ) )
-		play_emote( sel, w.open_angles );
+	if ( isdefined( sel ) && sel >= 0 && sel < 8 && isdefined( c.emotes[ c.wheel_ids[ sel ] ] ) )
+		play_emote( c.wheel_ids[ sel ], w.open_angles );
 	else
 	{
 		if ( can_emote() )
@@ -326,6 +344,10 @@ play_emote( id, angles )
 	}
 	if ( !can_emote() || ( !replaced && !( p isonground() ) ) )
 	{
+		if ( !can_emote() )
+			maps\_coop::log( "emote refused (can_emote: down, dead, end, barrier or linked)" );
+		else
+			maps\_coop::log( "emote refused (not on the ground)" );
 		weapons_on();
 		return;
 	}
@@ -341,6 +363,8 @@ play_emote( id, angles )
 	weapon = p getcurrentweapon();
 	if ( isdefined( c.emote_wpn ) )
 		weapon = c.emote_wpn;
+	if ( isdefined( e.nogun ) )
+		weapon = undefined;
 	c.emote = st;
 	weapons_off();
 	st.avatar = spawn_avatar( st.origin, st.angles[ 1 ], weapon );
@@ -467,6 +491,22 @@ hud_on()
 			setsaveddvar( h.names[ i ], h.old[ i ] );
 }
 
+// the song of a local emote. Right after a musicstop the engine refuses a new musicplay ("Unable to play
+// music alias"), even with no fade, so a replacing emote starts its song a moment later.
+start_music( alias )
+{
+	self endon( "death" );
+	self endon( "coop_emote_end" );
+	c = level.coop;
+	if ( isdefined( c.music_free_at ) && gettime() < c.music_free_at )
+	{
+		t = ( c.music_free_at - gettime() ) / 1000;
+		wait t;
+	}
+	musicplay( alias );
+	c.emote_music = true;
+}
+
 // on the avatar (local) or a puppet (remote): play the emote's anims in turn for dur ms
 play_sequence( e, dur, is_local )
 {
@@ -478,10 +518,7 @@ play_sequence( e, dur, is_local )
 		if ( !is_music( e.snd ) )
 			self playsound( e.snd );
 		else if ( isdefined( is_local ) )
-		{
-			musicplay( e.snd );
-			level.coop.emote_music = true;
-		}
+			self thread start_music( e.snd );
 	}
 	t_end = gettime() + dur;
 	for ( i = 0; gettime() < t_end; i++ )
@@ -602,7 +639,17 @@ stop_emote( reason )
 		st.avatar stopsounds();
 		if ( isdefined( level.coop.emote_music ) )
 		{
-			musicstop( 0.5 );
+			// a replacing emote starts its own song: cut this one at once instead of fading it
+			if ( reason == "replaced" )
+			{
+				musicstop( 0 );
+				level.coop.music_free_at = gettime() + 100;
+			}
+			else
+			{
+				musicstop( 0.5 );
+				level.coop.music_free_at = gettime() + 550;
+			}
 			level.coop.emote_music = undefined;
 		}
 		st.avatar delete();
@@ -674,6 +721,8 @@ puppet_emote_start( id, dur )
 	self.coop_emote_until = gettime() + dur;
 	if ( isdefined( e.snd ) && !is_music( e.snd ) )
 		self.coop_emote_snd = true;
+	if ( isdefined( e.nogun ) )
+		self.coop_emote_nogun = true; // _coop_puppet::replay_shots takes the gun off meanwhile
 	self thread play_sequence( e, dur );
 }
 
@@ -683,6 +732,7 @@ puppet_emote_stop()
 	if ( !isdefined( self.coop_emote_until ) )
 		return;
 	self.coop_emote_until = undefined;
+	self.coop_emote_nogun = undefined;
 	self notify( "coop_emote_end" );
 	if ( isdefined( self.coop_emote_snd ) )
 	{

@@ -22,7 +22,7 @@ show()
 		h.bg[ i ] = b;
 		t = elem( x, y, 12 );
 		t.fontscale = 1.25;
-		t settext( ( i + 1 ) + "  " + c.emotes[ i ].name );
+		t settext( ( i + 1 ) + "  " + c.emotes[ c.wheel_ids[ i ] ].name );
 		t.color = ( 1, 1, 1 );
 		t.coop_alpha = 1;
 		h.tx[ i ] = t;
@@ -100,7 +100,7 @@ update( w )
 	if ( h.sel >= 0 )
 	{
 		paint( h, h.sel, true );
-		h.ctx settext( level.coop.emotes[ h.sel ].name );
+		h.ctx settext( level.coop.emotes[ level.coop.wheel_ids[ h.sel ] ].name );
 		h.ctx.color = ( 1, 1, 1 );
 	}
 	else

@@ -121,6 +121,12 @@ def main():
     with open(os.path.join(out, 'skins.txt'), 'w') as f:
         f.write('\n'.join(skin_list) + '\n')
     print('skins:', ', '.join(skin_list) or 'none')
+    # custom emotes staged by tools/skin/addemote.py (their xanims and songs are in the same mod.ff)
+    if not a.stage:
+        sys.path.insert(0, os.path.join(HERE, 'skin'))
+        import emotepack
+        ems = emotepack.install(out, skins, pack_ok=os.path.isfile(sff))
+        print('custom emotes:', ', '.join(e['name'] for e in ems) or 'none')
     for extra in [x for x in a.also.split(',') if x]:
         dst = os.path.join(a.game, 'Mods', extra)
         shutil.copytree(out, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns('console.log'))

@@ -36,12 +36,14 @@ def staged():
 
 def install():
     """Copy the linked pack, textures and the skin list into Mods/coop (what tools/build.py also does)."""
+    import emotepack
     skins = staged()
+    emotes = emotepack.staged(skinenv.WORK)
     ff = os.path.join(skinenv.WORK, 'zone_out', 'mod.ff')
     img_dst = os.path.join(MOD, 'images')
     for old in glob.glob(os.path.join(img_dst, 'coop_*_col.iwi')):
         os.remove(old)
-    if skins and os.path.isfile(ff):
+    if (skins or emotes) and os.path.isfile(ff):
         shutil.copyfile(ff, os.path.join(MOD, 'mod.ff'))
         os.makedirs(img_dst, exist_ok=True)
         for f in glob.glob(os.path.join(skinenv.WORK, 'images', '*.iwi')):
@@ -55,11 +57,14 @@ def install():
         f.write('\treturn s;\n}\n')
     with open(os.path.join(MOD, 'skins.txt'), 'w') as f:
         f.write('\n'.join(skins) + '\n')
+    # custom emotes (addemote.py): the wheel's list, emotes.txt and the songs
+    emotepack.install(MOD, skinenv.WORK, pack_ok=os.path.isfile(os.path.join(MOD, 'mod.ff')))
 
 
 def repack():
+    import emotepack
     import pack
-    if staged():
+    if staged() or emotepack.staged(skinenv.WORK):
         pack.main()
     install()
 

@@ -492,6 +492,8 @@ replay_shots( slot, flags, pos, pitch, yaw )
 {
 	c = level.coop;
 	w = display_weapon( slot );
+	if ( isdefined( self.coop_emote_nogun ) )
+		w = ""; // a custom emote (dance) is played empty-handed
 	if ( w != self.coop_weapon && !isai( self ) ) // an avatar holds its own gun
 	{
 		if ( self.coop_weapon != "" )

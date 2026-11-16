@@ -1,4 +1,5 @@
-"""Link every skin staged by rebind.py into one skin pack (mod.ff) with the OAT Linker.
+"""Link every skin staged by rebind.py (and every custom emote staged by addemote.py) into one pack (mod.ff)
+with the OAT Linker.
 
   python tools/skin/pack.py
 
@@ -12,6 +13,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import emotepack  # noqa: E402
 import skinenv  # noqa: E402
 SKINS = skinenv.WORK
 LINKER = skinenv.LINKER
@@ -22,8 +24,9 @@ def main():
     skinenv.ensure_all()
     xdir = os.path.join(SKINS, 'xmodel')
     models = sorted(f[:-5] for f in os.listdir(xdir) if f.endswith('.json')) if os.path.isdir(xdir) else []
-    if not models:
-        sys.exit('no skins staged: run tools/skin/rebind.py first')
+    emote_lines = emotepack.zone_lines(SKINS)
+    if not models and not emote_lines:
+        sys.exit('no skins or emotes staged: run tools/skin/rebind.py or addemote.py first')
     import json
     lines = ['>game,IW3', '', 'techniqueset,,mc_l_sm_r0c0', 'image,,$identitynormalmap']
     for m in models:
@@ -31,6 +34,7 @@ def main():
         if not os.path.isfile(manifest):
             sys.exit('%s was staged by an older rebind.py: run rebind.py again for it' % m)
         lines += json.load(open(manifest))['assets']
+    lines += emote_lines
     os.makedirs(os.path.join(SKINS, 'zone_source'), exist_ok=True)
     open(os.path.join(SKINS, 'zone_source', 'mod.zone'), 'w').write('\n'.join(lines) + '\n')
     r = subprocess.run([LINKER, '-b', '.', '--add-asset-search-path', '.', '--source-search-path', './zone_source',
@@ -38,8 +42,9 @@ def main():
     print(r.stdout[-600:])
     if r.returncode != 0:
         sys.exit('linker failed')
+    emotepack.patch_ff(os.path.join(SKINS, 'zone_out', 'mod.ff'), SKINS)
     open(os.path.join(SKINS, 'skins.txt'), 'w').write('\n'.join(models) + '\n')
-    print('skin pack:', ', '.join(models))
+    print('skin pack:', ', '.join(models) or 'no skins', '| emotes:', ', '.join(e['name'] for e in emotepack.staged(SKINS)) or 'none')
 
 
 if __name__ == '__main__':

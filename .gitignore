@@ -3,3 +3,8 @@ build/
 __pycache__/
 native/build/
 *.log
+
+# local-only emote sources (never commit)
+*.ueanim
+*.uemodel
+/*.wav
