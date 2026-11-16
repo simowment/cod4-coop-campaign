@@ -2201,8 +2201,8 @@ function Toggle-Profile([bool]$open) {
 }
 function Save-Profile {
     $old = $settings.name
-    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
-    if ($txtName.Text -ne $settings.name) { $txtName.Text = $settings.name }      # an empty name shows "Player" again
+    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = $env:USERNAME }
+    if ($txtName.Text -ne $settings.name) { $txtName.Text = $settings.name }      # an empty name shows the Windows user name again
     $settings.skin = Get-SkinChoice $cmbSkin; Save-Settings
     $chip.Text = $settings.name; Place-Chip
     # in someone's lobby: show the new name as ours right away (the host hears it with the next heartbeat)
@@ -2217,7 +2217,7 @@ function Save-Profile {
 $chip.Add_Click({ if ($script:profileOpen) { Save-Profile }; Toggle-Profile (-not $script:profileOpen) })
 $btnDone.Add_Click({ Save-Profile; Toggle-Profile $false })
 $txtName.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq "Enter") { $e.SuppressKeyPress = $true; $btnDone.PerformClick() } })
-$txtName.Add_TextChanged({ $n = $txtName.Text.Trim(); if (-not $n) { $n = "Player" }; $lstLobby.IdleHost = $n; $chip.Text = $n; Place-Chip })
+$txtName.Add_TextChanged({ $n = $txtName.Text.Trim(); if (-not $n) { $n = $env:USERNAME }; $lstLobby.IdleHost = $n; $chip.Text = $n; Place-Chip })
 $tabStrip.Add_SelectedIndexChanged({ $pageLobby.Visible = $tabStrip.SelectedIndex -eq 0; $pageSettings.Visible = $tabStrip.SelectedIndex -eq 1 })
 $cmbMis.Add_SelectedIndexChanged({ if (-not $script:joining) { Update-MissionTile } })
 $txtCode.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq "Enter") { $e.SuppressKeyPress = $true; $btnJoin.PerformClick() } })
@@ -2356,7 +2356,7 @@ $btnHost.Add_Click({
         if ($script:lobby) { Close-Lobby; return }
         if ($script:setupFailed) { Start-Setup; return }
         if ($script:setupActive -or (Test-InGame)) { return }
-        $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
+        $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = $env:USERNAME }
         $settings.mission = $Missions[$cmbMis.SelectedItem]; $settings.bots = [int]$numBots.Value
         $settings.skin = Get-SkinChoice $cmbSkin; $settings.botskin = Get-SkinChoice $cmbBotSkin; Save-Settings
         $btnHost.Enabled = $false; $lblJoinStatus.Text = "Opening the game port on your router..."; $form.Refresh()
@@ -2470,7 +2470,7 @@ function Join-HostOrLobby([string]$ip, [int]$port, $info) {
         Join-Address $ip $port; return
     }
     if ($script:joining) { try { $script:joining.u.Close() } catch {} }
-    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }; Save-Settings
+    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = $env:USERNAME }; Save-Settings
     if (-not $script:ownPick) { $script:ownPick = @{ mis = $cmbMis.SelectedItem; bots = [int]$numBots.Value } }
     $script:joining = @{ u = (New-ProbeSocket); ep = (New-Object System.Net.IPEndPoint ([System.Net.IPAddress]::Parse($ip), $port)); ip = $ip; port = $port
                          host = $info.host; lastSend = [datetime]::MinValue; lastHeard = (Get-Date); lastCheck = (Get-Date); mission = ""; names = @() }
@@ -2550,7 +2550,7 @@ $btnLeave.Add_Click({
 })
 
 function Join-Address([string]$ip, [int]$port) {
-    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = "Player" }
+    $settings.name = $txtName.Text.Trim(); if (-not $settings.name) { $settings.name = $env:USERNAME }
     $settings.skin = Get-SkinChoice $cmbSkin; Save-Settings
     [void](Start-Game "+set coop_connect $($ip):$port")
     $form.Close()
