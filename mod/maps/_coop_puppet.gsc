@@ -267,6 +267,7 @@ update_puppet( slot )
 	// melee (flag 64): one swing over whatever the body is doing, then back to the gait anim
 	if ( ( flags & 64 ) != 0 && !isdefined( self.coop_melee_until ) )
 	{
+		self maps\_coop_emote::puppet_emote_stop();
 		self setanimknoball( %melee_1, %body, 1, 0.1, 1.3 );
 		self.coop_melee_until = gettime() + int( getanimlength( %melee_1 ) / 1.3 * 1000 );
 	}
@@ -279,6 +280,18 @@ update_puppet( slot )
 		}
 		self.coop_melee_until = undefined;
 		self.coop_anim = ""; // blend back into the gait anim
+	}
+	// emote (EM events, _coop_emote.gsc): hold the emote anim while the player stands still; walking off,
+	// going down or the time running out (a lost stop event, a late joiner) blends back into the gait
+	if ( isdefined( self.coop_emote_until ) )
+	{
+		if ( gettime() < self.coop_emote_until && dist <= 10 && ( flags & 16 ) == 0 )
+		{
+			self set_puppet_anim_move_only();
+			self replay_shots( slot, flags, pos, pitch, yaw );
+			return;
+		}
+		self maps\_coop_emote::puppet_emote_stop();
 	}
 	self set_puppet_anim( want );
 	self replay_shots( slot, flags, pos, pitch, yaw );

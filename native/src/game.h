@@ -14,6 +14,21 @@
 #define BT_FGETARG      0x6de7f0
 #define STUB_RET        0x4da560 /* bare ret shared by compiled-out builtins */
 
+/* client 0 key table: 256 x qkey_t { int down; int repeats; char *binding; } (Key_GetKeysForBinding 0x443820) */
+#define KEYS_BASE       0x81676c
+#define KEYS_COUNT      256
+/* console command list head: cmd_function_t { next; const char *name; autocomplete x2; void (*fn)(void); }
+   (Cmd_FindCommand 0x530b60, executor 0x531080) */
+#define CMD_LIST_HEAD   0xf789e4
+/* clientUIActives[0].keyCatchers: 1 = console, 0x10 = UI/menu (CL_KeyEvent 0x44411a / 0x4440e2) */
+#define KEY_CATCHERS    0x85bd74
+/* Key_StringToKeynum: usercall edi = name -> eax keynum or -1 (bind handler 0x443989; clobbers ecx, edx) */
+#define FN_Key_StringToKeynum 0x443630
+/* Key_WriteBindings(eax = localClientNum, [esp+4] = buffer) -> eax length; its only caller is the
+   config writer (Com_WriteConfiguration), at this E8 call */
+#define FN_Key_WriteBindings  0x443b40
+#define WRITEBINDINGS_CALL    0x534fef
+
 /* script VM */
 typedef struct { union { s32 u; float f; }; s32 type; } VarValue;
 #define VM_TOP        (*(VarValue **)0x1287250)

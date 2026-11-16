@@ -11,6 +11,7 @@ stops advancing, or when an expected flag never reaches the client.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -80,7 +81,17 @@ def wait_until(pred, timeout):
     return False
 
 
+def sync_client_mod():
+    """The client instance runs from Mods/coopb (its own console.log and saves). tools/build.py only
+    installs Mods/coop (unless --also coopb), so mirror it here before every run."""
+    src, dst = os.path.join(GAME, 'Mods', 'coop'), os.path.join(GAME, 'Mods', 'coopb')
+    if not os.path.isfile(os.path.join(src, '.patched')):
+        raise SystemExit('Mods/coop is not built (run tools/build.py first)')
+    shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns('console.log', 'save', 'hunkusage.dat'))
+
+
 def run(plan):
+    sync_client_mod()
     lvl = plan['level']
     outdir = os.path.join(RESULTS, lvl)
     os.makedirs(outdir, exist_ok=True)

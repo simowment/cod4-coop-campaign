@@ -17,6 +17,110 @@
 int g_forceUnpause = 1;
 static int g_as = -1; /* openfile("coop","as",slot): the next fprintln/fprintfields speaks for that bot slot */
 
+/* ---- emote key binding, kept out of the player's config ----
+   The emote key is bound with a normal "bind" (so the engine's own key handling runs it), but the
+   config writer never sees it: around Key_WriteBindings the key's binding is swapped for whatever it
+   was bound to before we took it. Changing coop_emote_key (or "none") gives the old key back. */
+static int g_ek = -1;          /* keynum we bound, -1 none */
+static char g_ek_name[16];     /* its name as given to "bind" */
+static char g_ek_prev[256];    /* its binding before we took it ("" = unbound) */
+static char *g_ek_saved;
+static int g_ek_swapped;
+
+static int key_from_name(const char *name)
+{
+	int k;
+	const char *n = name;
+	__asm__ volatile("movl %2, %%eax; call *%%eax" : "=a"(k), "+D"(n) : "i"(FN_Key_StringToKeynum) : "ecx", "edx", "memory", "cc");
+	if (k >= 'A' && k <= 'Z') k += 32; /* the bind command lowercases too */
+	return (k >= 0 && k < KEYS_COUNT) ? k : -1;
+}
+
+static char **key_binding_slot(int k) { return (char **)(KEYS_BASE + k * 12 + 8); }
+
+static void quote_free(char *d, const char *s, int cap)
+{
+	int n = 0;
+	for (; *s && n < cap - 1; s++) if (*s != '"') d[n++] = *s;
+	d[n] = 0;
+}
+
+static int emote_bind(const char *name)
+{
+	char c[340], prev[256];
+	int k = -1;
+	if (name[0] && stricmp_(name, "none")) k = key_from_name(name);
+	if (g_ek >= 0 && g_ek != k) {
+		/* give the old key back what it had */
+		quote_free(prev, g_ek_prev, sizeof prev);
+		if (prev[0]) fmt(c, sizeof c, "bind %s \"%s\"\n", g_ek_name, prev);
+		else fmt(c, sizeof c, "unbind %s\n", g_ek_name);
+		cbuf_add_text(c);
+		logf("emote key: %s back to '%s'", g_ek_name, prev);
+		g_ek = -1;
+	}
+	if (k < 0) return 0;
+	if (g_ek != k) {
+		const char *b = *key_binding_slot(k);
+		g_ek_prev[0] = 0;
+		/* "+coop_emote" or the old draft's menu bind left in a config are ours, not the player's */
+		if (b && stricmp_(b, "+coop_emote") && strncmp(b, "openscriptmenu emote_menu", 25)) strlcpy_(g_ek_prev, b, sizeof g_ek_prev);
+		strlcpy_(g_ek_name, name, sizeof g_ek_name);
+		g_ek = k;
+		logf("emote key: %s (was '%s')", g_ek_name, g_ek_prev);
+	}
+	fmt(c, sizeof c, "bind %s +coop_emote\n", g_ek_name);
+	cbuf_add_text(c);
+	return 1;
+}
+
+/* called around Key_WriteBindings (from the thunk below) */
+void emote_bind_hide(void) __asm__("coop_emote_bind_hide");
+void emote_bind_show(void) __asm__("coop_emote_bind_show");
+void emote_bind_hide(void)
+{
+	if (g_ek < 0 || g_ek_swapped) return;
+	char **slot = key_binding_slot(g_ek);
+	if (!*slot || stricmp_(*slot, "+coop_emote")) return;
+	g_ek_saved = *slot;
+	*slot = g_ek_prev; /* "" is skipped by the writer */
+	g_ek_swapped = 1;
+}
+void emote_bind_show(void)
+{
+	if (!g_ek_swapped) return;
+	*key_binding_slot(g_ek) = g_ek_saved;
+	g_ek_swapped = 0;
+}
+
+/* usercall eax = localClientNum, [esp+4] = buffer; keep both for the real one */
+void wb_thunk(void) __asm__("coop_wb_thunk");
+__asm__(
+	".text\n"
+	"coop_wb_thunk:\n"
+	"	pushl %eax\n"
+	"	call coop_emote_bind_hide\n"
+	"	popl %eax\n"
+	"	pushl 4(%esp)\n"
+	"	movl $0x443b40, %ecx\n"
+	"	call *%ecx\n"
+	"	addl $4, %esp\n"
+	"	pushl %eax\n"
+	"	call coop_emote_bind_show\n"
+	"	popl %eax\n"
+	"	ret\n");
+
+static int install_writebindings_hook(void)
+{
+	u8 *p = (u8 *)WRITEBINDINGS_CALL;
+	if (p[0] != 0xE8 || (u32)(WRITEBINDINGS_CALL + 5 + *(s32 *)(p + 1)) != FN_Key_WriteBindings) return 0;
+	u32 old;
+	if (!VirtualProtect(p, 5, 0x40, &old)) return 0;
+	*(s32 *)(p + 1) = (s32)((u32)wb_thunk - (WRITEBINDINGS_CALL + 5));
+	VirtualProtect(p, 5, old, &old);
+	return 1;
+}
+
 static int is_coop_arg0(void)
 {
 	return scr_nparams() >= 1 && scr_type(0) == VT_STRING && !strcmp(scr_str(0), "coop");
@@ -62,6 +166,21 @@ static void bi_openfile(void)
 	if (!strcmp(cmd, "isbot")) { scr_add_int(net_is_bot(iarg)); return; }
 	if (!strcmp(cmd, "as")) { g_as = net_is_bot(iarg) ? iarg : -1; scr_add_int(g_as >= 0); return; }
 	if (!strcmp(cmd, "version")) { scr_add_string(COOP_NATIVE_VERSION); return; }
+	/* is any key bound to <arg> (e.g. "+forward", "+coop_emote") held down right now? Movement has no
+	   GSC button query in SP, and a bind is the only layout-independent (AZERTY...) way to know the key */
+	if (!strcmp(cmd, "bindheld")) {
+		int held = 0;
+		/* the key table records key-down even while the console or a menu has the keyboard */
+		if (*(volatile s32 *)KEY_CATCHERS & 0x11) { scr_add_int(0); return; }
+		for (int k = 0; k < KEYS_COUNT && !held; k++) {
+			u8 *q = (u8 *)(KEYS_BASE + k * 12);
+			const char *b = *(const char **)(q + 8);
+			if (b && *(s32 *)q && !stricmp_(b, arg)) held = 1;
+		}
+		scr_add_int(held); return;
+	}
+	/* openfile("coop","bindemote",key|"none"): bind key to "+coop_emote" for this session only */
+	if (!strcmp(cmd, "bindemote")) { scr_add_int(emote_bind(arg)); return; }
 	scr_add_int(-2);
 }
 
@@ -180,5 +299,6 @@ int bridge_install(void)
 	ok &= patch_one(BT_FPRINTFIELDS, "fprintfields", bi_fprintfields);
 	ok &= patch_one(BT_FREADLN, "freadln", bi_freadln);
 	ok &= patch_one(BT_FGETARG, "fgetarg", bi_fgetarg);
+	if (!install_writebindings_hook()) logf("bridge: config writer hook failed (the emote key bind will be saved)");
 	return ok;
 }

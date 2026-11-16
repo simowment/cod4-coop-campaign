@@ -233,6 +233,16 @@ bot_think( slot, idx )
 			wait 0.05;
 			continue;
 		}
+		// the host is emoting (its player entity sits at the emote camera): stand still, so a bot that
+		// joined in keeps playing the emote on its puppet
+		if ( isdefined( c.emote ) )
+		{
+			b.speed = 0;
+			b.following = false;
+			bot_pose( slot, b, 0, 0, b.yaw );
+			wait 0.05;
+			continue;
+		}
 
 		// breadcrumb trail: only spots the host stood on
 		if ( p isonground() && ( b.trail.size == 0 || distance( b.trail[ b.trail.size - 1 ], p.origin ) > 32 ) )

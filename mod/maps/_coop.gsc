@@ -94,6 +94,7 @@ postinit()
 	maps\_coop_puppet::init();
 	maps\_coop_avatar::init();
 	maps\_coop_bot::init();
+	maps\_coop_emote::init();
 	log( "postinit: " + c.trig_count + " triggers, " + c.spawner_count + " spawners" );
 }
 
@@ -154,7 +155,10 @@ net_loop()
 	{
 		// a loaded checkpoint rewinds level time; events still queued belong to the dead timeline
 		if ( openfile( "coop", "tick", gettime() ) > gettime() + 500 )
+		{
 			drain_stale_events();
+			maps\_coop_emote::on_checkpoint_load();
+		}
 		send_pose();
 		for ( i = 0; i < 64; i++ )
 		{
@@ -194,7 +198,7 @@ test_teleport()
 	log( "test teleport " + v );
 }
 
-// test hook: "set coop_test_cmd <killnear|hurt|save|nextmission|fail>" (automated tests only)
+// test hook: "set coop_test_cmd <killnear|hurt|save|nextmission|fail|emote N|emotewheel ...>" (automated tests only)
 test_command()
 {
 	v = getdvar( "coop_test_cmd" );
@@ -277,6 +281,12 @@ test_command()
 		else
 			log( "test nearaxis: no axis" );
 	}
+	else if ( getsubstr( v, 0, 11 ) == "emotewheel " )
+		maps\_coop_emote::test_wheel( getsubstr( v, 11, v.size ) );
+	else if ( getsubstr( v, 0, 6 ) == "emote " )
+		maps\_coop_emote::test_emote( getsubstr( v, 6, v.size ) );
+	else if ( getsubstr( v, 0, 9 ) == "botemote " )
+		maps\_coop_emote::test_bot_emote( getsubstr( v, 9, v.size ) );
 	else if ( v == "hurt" )
 		level.player dodamage( level.player.health - 1, level.player.origin );
 	else if ( v == "save" )
@@ -362,6 +372,12 @@ send_pose()
 	p = level.player;
 	o = p.origin;
 	a = p getplayerangles();
+	em = level.coop.emote;
+	if ( isdefined( em ) && isdefined( em.cam ) )
+	{
+		o = em.origin; // the player entity sits at the emote camera: squadmates see the body where it stands
+		a = em.angles;
+	}
 	flags = 0;
 	stance = p getstance();
 	if ( stance == "crouch" )
@@ -376,7 +392,7 @@ send_pose()
 		flags += 16;
 	if ( p ismeleeing() )
 		flags += 64; // squadmates play a melee swing
-	if ( isdefined( level.coop.hidden ) || player_linked() )
+	if ( isdefined( level.coop.hidden ) || ( player_linked() && !isdefined( em ) ) )
 		flags += 32;
 	flags += ( level.coop.shots % 256 ) * 256;
 	flags += maps\_coop_puppet::gait_bits( p getvelocity(), a[ 1 ] );
@@ -393,6 +409,15 @@ update_linked()
 	c = level.coop;
 	p = level.player;
 	o = p.origin;
+	if ( isdefined( c.emote ) && isdefined( c.emote.cam ) )
+	{
+		// on our own emote camera: not a level link (bots keep following, the puppet stays visible).
+		// If the level links the player elsewhere meanwhile, _coop_emote::watch_cancel ends the emote.
+		c.link_score = 0;
+		c.linked = false;
+		c.last_origin = o;
+		return;
+	}
 	v = p getvelocity();
 	if ( !isdefined( c.last_origin ) )
 		c.last_origin = o;
@@ -465,6 +490,7 @@ register_handlers()
 	h[ "V" ] = maps\_coop_player::ev_revive;
 	h[ "Y" ] = ::ev_teleport_to;
 	h[ "Q" ] = maps\_coop_levels::ev_scene;
+	h[ "EM" ] = maps\_coop_emote::ev_emote;
 	level.coop.handlers = h;
 }
 
@@ -690,8 +716,8 @@ poll_touch_triggers()
 	for ( ;; )
 	{
 		wait 0.1;
-		if ( !c.active || !isalive( level.player ) )
-			continue;
+		if ( !c.active || !isalive( level.player ) || isdefined( c.emote ) )
+			continue; // emoting: the player entity is at the camera spot, not really there
 		for ( ci = 0; ci < classes.size; ci++ )
 		{
 			ents = getentarray( classes[ ci ], "classname" );
@@ -867,7 +893,7 @@ can_save()
 	c = level.coop;
 	if ( !c.active )
 		return true;
-	if ( c.down )
+	if ( c.down || maps\_coop_emote::busy() )
 		return false;
 	for ( i = 0; i < c.max; i++ )
 		if ( c.downed[ i ] && slot_connected( i ) )
@@ -891,7 +917,13 @@ client_save( filename )
 		return;
 	if ( level.player.health < level.player.maxhealth * 0.3 )
 		return; // would trap us in a fail/reload loop; the next host checkpoint will catch us
-	
+	if ( maps\_coop_emote::busy() )
+	{
+		// a save is about to be written: never save the emote camera link or the open wheel
+		maps\_coop_emote::close_wheel( -1 );
+		maps\_coop_emote::stop_emote( "checkpoint" );
+	}
+
 	flag_set( "game_saving" );
 	saveId = saveGameNoCommit( filename, maps\_autosave::getDescription() );
 	if ( saveId >= 0 )

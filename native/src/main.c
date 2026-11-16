@@ -29,6 +29,27 @@ static int patch_vtable(void **vt, int idx, void *fn, void **orig)
 	return 1;
 }
 
+/* "+coop_emote"/"-coop_emote" (the emote key's bind) reach GSC through notifyOnCommand, which the engine
+   checks before it looks the command up. Registered as real do-nothing commands so that a key press does
+   not print "Unknown command" in the console. */
+typedef struct CmdFn { struct CmdFn *next; const char *name; void *ac1, *ac2; void (*fn)(void); } CmdFn;
+static void cmd_noop(void) {}
+static CmdFn g_cmds[] = {
+	{ 0, "+coop_emote", 0, 0, cmd_noop },
+	{ 0, "-coop_emote", 0, 0, cmd_noop },
+};
+static void register_noop_cmds(void)
+{
+	CmdFn **head = (CmdFn **)CMD_LIST_HEAD;
+	for (unsigned i = 0; i < sizeof g_cmds / sizeof g_cmds[0]; i++) {
+		int linked = 0;
+		for (CmdFn *c = *head; c; c = c->next) if (c == &g_cmds[i]) linked = 1;
+		if (linked) continue;
+		g_cmds[i].next = *head;
+		*head = &g_cmds[i];
+	}
+}
+
 /* Game main thread, once per frame (after Com_Frame). Everything that touches game state - network,
    Cbuf, dvars - runs here. NOT in Present: iw3sp presents from its render backend thread, and the main
    thread may be spin-waiting on that thread (a SendMessage-style call from there deadlocks). */
@@ -36,7 +57,11 @@ static void main_tick(void)
 {
 	if (!g_enabled) return;
 	static int once;
-	if (!once) { once = 1; cbuf_add_text("set loc_warnings 0\n"); } /* else plain-text HUD names show "UNLOCALIZED:" (script may not set it) */
+	if (!once) {
+		once = 1;
+		cbuf_add_text("set loc_warnings 0\n"); /* else plain-text HUD names show "UNLOCALIZED:" (script may not set it) */
+		register_noop_cmds();
+	}
 	/* +set coop_startmap X: start at the menu and load X from there. Loading a map straight from the
 	   command line can stall before the first server frame when the window is not focused. */
 	static int startDone; static double t0;
