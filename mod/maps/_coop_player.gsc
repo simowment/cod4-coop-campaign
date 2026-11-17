@@ -66,6 +66,10 @@ go_down()
 {
 	c = level.coop;
 	p = level.player;
+	// an emote keeps the player linked, and allowstand/allowcrouch( false ) on a linked player is a fatal
+	// script error ("All stances disallowed for linked player"): end it first (the damage watcher may run later)
+	if ( isdefined( c.emote ) )
+		maps\_coop_emote::stop_emote( "down" );
 	c.down = true;
 	c.down_since = gettime();
 	p enableinvulnerability();

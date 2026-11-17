@@ -5,6 +5,7 @@
 #include "net.h"
 #include "bridge.h"
 #include "devmode.h"
+#include "ncam.h"
 
 typedef void *(WINAPI *Direct3DCreate9_t)(u32);
 typedef s32 (WINAPI *CreateDevice_t)(void *self, u32 adapter, u32 type, void *hwnd, u32 flags, void *pp, void **out);
@@ -172,6 +173,8 @@ static void start_once(void)
 	if (!install_mainloop_hook()) { logf("proxy: main loop hook failed, coop disabled"); return; }
 	devmode_patch_pause();
 	logf("proxy: main loop hooked");
+	if (ncam_install()) logf("proxy: view hook installed (emote camera)");
+	else logf("proxy: view hook failed (emotes use the script camera)");
 	net_init();
 	g_enabled = 1;
 }

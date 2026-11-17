@@ -13,6 +13,7 @@
 #include "game.h"
 #include "net.h"
 #include "devmode.h"
+#include "ncam.h"
 
 int g_forceUnpause = 1;
 static int g_as = -1; /* openfile("coop","as",slot): the next fprintln/fprintfields speaks for that bot slot */
@@ -181,6 +182,19 @@ static void bi_openfile(void)
 	}
 	/* openfile("coop","bindemote",key|"none"): bind key to "+coop_emote" for this session only */
 	if (!strcmp(cmd, "bindemote")) { scr_add_int(emote_bind(arg)); return; }
+	/* openfile("coop","emotecam", pivot, arm, ignoreEntnum [, minz]): per-frame orbit camera around pivot, on or
+	   refreshed (call every 0.05 s, it turns itself off without refreshes). openfile("coop","emotecam") = off.
+	   Returns 1 when the native camera runs it, 0 when the hook is not installed (use the script camera) */
+	if (!strcmp(cmd, "emotecam")) {
+		float pivot[3];
+		if (!scr_vec(2, pivot)) { ncam_stop("script"); scr_add_int(ncam_available()); return; }
+		float arm = scr_float(3);
+		int ignore = scr_nparams() >= 5 ? scr_int(4) : 1023;
+		float minz = scr_nparams() >= 6 ? scr_float(5) : pivot[2] - 22.0f;
+		ncam_set(pivot, arm, ignore, minz);
+		scr_add_int(ncam_available());
+		return;
+	}
 	scr_add_int(-2);
 }
 

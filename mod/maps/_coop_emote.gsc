@@ -14,7 +14,9 @@
 // player cannot react, so any hit (stray fire included) hands control back.
 //
 // While emoting you see yourself from the front: a copy of your character plays the emote at your spot
-// and the player view is linked to a camera (iw3sp has no cg_thirdperson). Moving, jumping, firing, aim,
+// and the view orbits it with the mouse (iw3sp has no cg_thirdperson). With the proxy's view hook
+// (openfile "emotecam") the camera is placed natively every rendered frame while the player stays linked
+// at their own spot; without it the player view is linked to a script camera moved at 20 Hz. Moving, jumping, firing, aim,
 // melee, grenades, damage, going down, death, level end and the emote key all cancel it; the player is
 // put back exactly where they stood. Squadmates see the same emote on your puppet ("EM|id|ms", "EM|-1").
 // Every anim and sound used here is in common.ff, so it works in every level. Custom emotes (dances made
@@ -336,10 +338,13 @@ play_emote( id, angles )
 		maps\_coop_emote_hud::hide();
 	}
 	replaced = false;
+	prev_origin = undefined;
 	if ( isdefined( c.emote ) )
 	{
-		// it put us back where we stood (on the ground); isonground() only catches up next frame
+		// it put us back where we stood (on the ground); isonground() only catches up next frame. Keep that
+		// spot: p.origin straight after setorigin reads back a unit higher, so chained emotes would climb
 		replaced = true;
+		prev_origin = c.emote.origin;
 		stop_emote( "replaced" );
 	}
 	if ( !can_emote() || ( !replaced && !( p isonground() ) ) )
@@ -358,6 +363,8 @@ play_emote( id, angles )
 	st = spawnstruct();
 	st.id = id;
 	st.origin = p.origin;
+	if ( isdefined( prev_origin ) )
+		st.origin = prev_origin;
 	st.angles = ( angles[ 0 ], angles[ 1 ], 0 );
 	st.end = gettime() + e.dur_ms;
 	weapon = p getcurrentweapon();
@@ -440,18 +447,67 @@ start_camera( st )
 		campos = head + vectorscale( best - head, f );
 	}
 	look = st.origin + ( 0, 0, 38 );
+	st.cam_center = look;
+	st.cam_eye = eye_h;
+	// native orbit camera (the proxy moves the view every rendered frame, with no lag): the player stays
+	// linked, still, at their own spot and only turns the view; the arcs clamp the pitch
+	st.cam_dist = 125;
+	st.cam_ent = st.avatar getentitynumber();
+	if ( openfile( "coop", "emotecam", look, st.cam_dist, st.cam_ent, st.origin[ 2 ] + 16 ) == 1 )
+	{
+		cam = spawn( "script_model", st.origin );
+		cam setmodel( "tag_origin" );
+		cam.angles = ( 0, 0, 0 );
+		p playerlinkto( cam, "tag_origin", 0, 180, 180, 35, 60 );
+		ang = vectortoangles( look - campos );
+		pitch = maps\_coop_puppet::angle180( ang[ 0 ] );
+		if ( pitch < -30 )
+			pitch = -30;
+		else if ( pitch > 55 )
+			pitch = 55;
+		p setplayerangles( ( pitch, ang[ 1 ], 0 ) );
+		st.cam_native = true;
+		st.cam_got = st.cam_dist;
+		hud_off();
+		p thread native_camera( st, cam );
+		return cam;
+	}
 	cam = spawn( "script_model", campos - ( 0, 0, eye_h ) );
 	cam setmodel( "tag_origin" );
 	cam.angles = ( 0, 0, 0 ); // fixed: the player's own look decides where the camera orbits to
 	// free look while linked (0 = the view does not follow the tag; arcs cover all around but the back seam)
 	p playerlinkto( cam, "tag_origin", 0, 180, 180, 75, 75 );
 	p setplayerangles( vectortoangles( look - campos ) );
-	st.cam_center = look;
 	st.cam_dist = distance( look, campos );
-	st.cam_eye = eye_h;
 	hud_off();
 	p thread orbit_camera( st, cam );
 	return cam;
+}
+
+// keeps the native camera alive while this emote runs (it switches itself off without refreshes, so a
+// script that stops for any reason - level end, error - gives the normal view back by itself)
+native_camera( st, cam )
+{
+	self endon( "death" );
+	c = level.coop;
+	for ( ;; )
+	{
+		wait 0.05;
+		if ( !isdefined( c.emote ) || c.emote != st || !isdefined( cam ) )
+			return;
+		// the orbit centre follows the avatar's chest height (kneel, crouch, lie down; the proxy eases it)
+		if ( isdefined( st.avatar ) )
+		{
+			z = st.avatar gettagorigin( "j_spine4" )[ 2 ] - st.origin[ 2 ];
+			if ( z < 14 )
+				z = 14;
+			else if ( z > 40 )
+				z = 40;
+			st.cam_center = ( st.cam_center[ 0 ], st.cam_center[ 1 ], st.origin[ 2 ] + z );
+		}
+		if ( openfile( "coop", "emotecam", st.cam_center, st.cam_dist, st.cam_ent, st.origin[ 2 ] + 16 ) != 1 )
+			return;
+	}
 }
 
 // the camera circles the avatar: it sits behind the view direction, looking at the avatar, and is pulled
@@ -556,7 +612,7 @@ hud_off()
 	for ( i = 0; i < names.size; i++ )
 	{
 		h.old[ i ] = getdvar( names[ i ] );
-		setsaveddvar( names[ i ], vals[ i ] );
+		set_hud_dvar( names[ i ], vals[ i ] );
 	}
 	c.emote_hud = h;
 }
@@ -571,7 +627,16 @@ hud_on()
 	c.emote_hud = undefined;
 	for ( i = 0; i < h.names.size; i++ )
 		if ( getdvar( h.names[ i ] ) == h.vals[ i ] && h.old[ i ] != "" )
-			setsaveddvar( h.names[ i ], h.old[ i ] );
+			set_hud_dvar( h.names[ i ], h.old[ i ] );
+}
+
+// cg_drawCrosshair is a player setting, not a SAVED dvar: setsaveddvar refuses it
+set_hud_dvar( name, val )
+{
+	if ( name == "cg_drawCrosshair" )
+		setdvar( name, val );
+	else
+		setsaveddvar( name, val );
 }
 
 // the song of a local emote. Right after a musicstop the engine refuses a new musicplay ("Unable to play
@@ -696,6 +761,8 @@ stop_emote( reason )
 	c.emote = undefined;
 	p = level.player;
 	p notify( "coop_emote_over" );
+	if ( isdefined( st.cam_native ) )
+		openfile( "coop", "emotecam" ); // normal view from the next frame on
 	if ( isdefined( st.cam ) )
 	{
 		// only undo our own link: if the level took the player meanwhile (scene, rig) it keeps them

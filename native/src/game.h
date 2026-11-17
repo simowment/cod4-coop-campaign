@@ -77,6 +77,16 @@ static inline int scr_int(int i)
 	return 0;
 }
 
+/* a vector param: copies it to out, returns 0 (out untouched) if param i is not a vector */
+static inline int scr_vec(int i, float *out)
+{
+	if (scr_type(i) != VT_VECTOR) return 0;
+	const float *v = (const float *)scr_param(i)->u;
+	if (!v) return 0;
+	out[0] = v[0]; out[1] = v[1]; out[2] = v[2];
+	return 1;
+}
+
 static inline void scr_add_int(int v) { ((void (*)(int))FN_Scr_AddInt)(v); }
 static inline void scr_add_float(float f)
 {
