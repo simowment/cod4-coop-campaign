@@ -2300,6 +2300,7 @@ function Test-InGame { return [bool]($script:hostingProc -and -not $script:hosti
 function Get-SquadCount {
     if ($script:lobby) { return 1 + [int]$numBots.Value + $script:lobby.members.Count }
     if ($script:joining) { return [Math]::Max(1, $lstLobby.Items.Count) }
+    if ($script:gameSquad -and (Test-InGame)) { return $script:gameSquad.Count }
     return 1 + [int]$numBots.Value
 }
 # 4 players at most: while hosting, every friend in the lobby takes a bot's place
@@ -2324,6 +2325,9 @@ function Update-Squad {
         [void]$lstLobby.Items.Add("$($settings.name) (you, host)")
         for ($b = 1; $b -le [int]$numBots.Value; $b++) { [void]$lstLobby.Items.Add("Bot $b") }
         foreach ($m in $script:lobby.members.Values) { [void]$lstLobby.Items.Add($m.name) }
+    } elseif ($script:gameSquad -and (Test-InGame)) {
+        # hosting a running game: the squad that was launched (the lobby socket is closed by then)
+        foreach ($n in $script:gameSquad) { [void]$lstLobby.Items.Add($n) }
     } elseif ($script:joining) {
         $names = @($script:joining.names | Where-Object { $_ })
         if (-not $names.Count) { $names = @($script:joining.host, $settings.name) }
@@ -2514,6 +2518,7 @@ $btnLaunch.Add_Click({
     # tell every friend in the lobby to start their game, then free the port for ours
     for ($r = 0; $r -lt 3; $r++) { foreach ($m in $L.members.Values) { Send-Packet $L.u $m.ep 10 "$Port" }; Start-Sleep -Milliseconds 60 }
     $wait = 1 + $L.members.Count + $settings.bots
+    $script:gameSquad = @("$($settings.name) (you, host)") + @(if ($settings.bots -gt 0) { 1..$settings.bots | ForEach-Object { "Bot $_" } }) + @($L.members.Values | ForEach-Object { $_.name })
     try { $L.u.Close() } catch {}
     $script:lobby = $null
     $line = "Game starting for $wait players (you, $($settings.bots) bots, $($L.members.Count) friends). Friends can still join with these codes while you play."
@@ -3391,7 +3396,7 @@ Refresh-Emotes
 
 # keep the router port open while hosting; close it when the game exits or the launcher closes
 $timer = New-Object System.Windows.Forms.Timer; $timer.Interval = 2000
-$timer.Add_Tick({ if ($script:hostingProc -and $script:hostingProc.HasExited) { Stop-PackServer; Close-RouterPort; $script:hostingProc = $null; $script:codes = @(); $lblJoinStatus.Text = "The game closed. Hosting stopped."; Update-Mode } })
+$timer.Add_Tick({ if ($script:hostingProc -and $script:hostingProc.HasExited) { Stop-PackServer; Close-RouterPort; $script:hostingProc = $null; $script:codes = @(); $script:gameSquad = $null; Update-Squad; $lblJoinStatus.Text = "The game closed. Hosting stopped."; Update-Mode } })
 $timer.Start()
 $form.Add_FormClosing({
     # say goodbye, so the lobby (or its players) need not wait for the time-out

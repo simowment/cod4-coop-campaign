@@ -122,9 +122,12 @@ static s32 WINAPI hk_SCPresent(void *self, const void *src, const void *dst, voi
 static void *g_gameWnd, *g_gameOldProc;
 static s32 WINAPI game_wndproc(void *h, u32 msg, u32 wp, s32 lp)
 {
+	/* only what the player does: Alt+F4, or the title bar's X / the taskbar's Close (WM_SYSCOMMAND SC_CLOSE).
+	   Never a bare WM_CLOSE: the game sends that to its own window when it rebuilds it while a level starts,
+	   and quitting then killed a host right as the map loaded. */
 	if ((msg == 0x0104 /* WM_SYSKEYDOWN */ && wp == 0x73 /* VK_F4 */ && (lp & (1 << 29)) /* Alt held */)
-	    || msg == 0x0010 /* WM_CLOSE */) {
-		logf("proxy: Alt+F4 / close: quitting");
+	    || (msg == 0x0112 /* WM_SYSCOMMAND */ && (wp & 0xFFF0) == 0xF060 /* SC_CLOSE */)) {
+		logf("proxy: Alt+F4 / close button: quitting");
 		cbuf_add_text("quit\n");
 		return 0;
 	}
