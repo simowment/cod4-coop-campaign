@@ -1,6 +1,6 @@
 """One-step skin management (what the launcher's Skins tab runs).
 
-  python addskin.py rigprep <model file> <out.json> [--flip auto|0|1] [--up auto|y|z]
+  python addskin.py rigprep <model file> <out.json> [--flip auto|0|1] [--up auto|y|z] [--yaw 0|90|180|270]
   python addskin.py add <model file> <name> [--rig <rig.json>] [--flip] [--layers preset.json]
   python addskin.py remove <name>
   python addskin.py list
@@ -132,6 +132,7 @@ def rigprep(args):
     ap.add_argument('json')
     ap.add_argument('--flip', default='auto', choices=['auto', '0', '1'])
     ap.add_argument('--up', default='auto', choices=['auto', 'y', 'z'])
+    ap.add_argument('--yaw', default='0', help='extra turn about the up axis: 0, 90, 180 or 270')
     a = ap.parse_args(args)
     import rebind
     src = os.path.abspath(a.file)
@@ -147,7 +148,7 @@ def rigprep(args):
         return
     import autorig
     skinenv.say('no skeleton: guessing the rig markers ...')
-    autorig.rigprep(ch, src, out, up=a.up, flip=a.flip)
+    autorig.rigprep(ch, src, out, up=a.up, flip=a.flip, yaw=a.yaw)
     print('OK rigprep %s' % out, flush=True)
 
 
@@ -190,12 +191,14 @@ def main():
             name = rebind.re.sub(r'[^a-z0-9_]', '_', a.name.lower()).strip('_') or 'skin'
             model = 'coop_' + name
             flip, up, markers, rig, rig_png = (True if a.flip else 'auto'), 'auto', None, None, None
+            yaw = 0
             if a.rig:   # read it first: it may be the very file in rigs/ that gets replaced below
                 import autorig
                 rig = autorig.load_rig(a.rig)
                 if not rig.get('rigged'):
                     markers = autorig.markers_from_json(rig)
                     up = rig.get('up', 'auto')
+                    yaw = rig.get('yaw', 0)
                     # the markers were placed on the image of THIS facing: --flip cannot turn the model
                     # under them (it would mirror them)
                     flip = bool(rig.get('flip', False))
@@ -220,7 +223,7 @@ def main():
                 # no front view to keep (the rig json's png is gone): convert writes a fresh one, with the
                 # markers used (the user's)
                 rebind.convert(a.file, name, out=skinenv.WORK, preview=preview, layers=a.layers, flip=flip, up=up,
-                               markers=markers, rig_out=None if (rig and rig_png is not None) else rj)
+                               markers=markers, yaw=yaw, rig_out=None if (rig and rig_png is not None) else rj)
                 if rig and rig_png is not None:   # keep the user's rig (markers as placed) for "Edit rig"
                     os.makedirs(os.path.dirname(rj), exist_ok=True)
                     with open(rp, 'wb') as f:

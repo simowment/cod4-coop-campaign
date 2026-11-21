@@ -34,6 +34,21 @@ from PIL import Image, ImageDraw
 
 Z_UP = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], float)   # Z-up (front -Y) -> Y-up (front +Z)
 TURN = np.diag([-1.0, 1.0, -1.0])                              # 180 deg about Y
+
+
+def rot_y(deg):
+    """rotation about Y (up) by deg, counter-clockwise seen from above"""
+    r = np.radians(deg)
+    c, s_ = np.cos(r), np.sin(r)
+    return np.array([[c, 0, s_], [0, 1, 0], [-s_, 0, c]], float)
+
+
+def clean_yaw(yaw):
+    """0 / 90 / 180 / 270 (the rig editor's rotate buttons; anything else is snapped to 90)"""
+    try:
+        return int(round(float(yaw or 0) / 90.0)) % 4 * 90
+    except (TypeError, ValueError):
+        return 0
 MARKERS = ('chin', 'groin', 'left_wrist', 'right_wrist', 'left_elbow', 'right_elbow', 'left_knee', 'right_knee')
 SIDES = (('Left', 1), ('Right', -1))
 
@@ -504,7 +519,7 @@ def facing_score(m):
     return feet
 
 
-def orientation(ch, up='auto', flip='auto'):
+def orientation(ch, up='auto', flip='auto', yaw=0):
     """-> (mesh in turned space, up 'y'|'z', flip bool, flip_auto bool, score). flip_auto = the facing the
     detector picks (the launcher shows "set by you" when flip differs from it)"""
     up = (up or 'auto').lower()
@@ -522,6 +537,9 @@ def orientation(ch, up='auto', flip='auto'):
         f = auto
     if f:
         m = m.turned(TURN)      # same mesh, turned 180 deg about Y (no second build)
+    yaw = clean_yaw(yaw)
+    if yaw:
+        m = m.turned(rot_y(yaw))  # the user's quarter turns (a model facing sideways)
     return m, up, f, auto, feet
 
 
@@ -1194,20 +1212,22 @@ def fix_sides(mk):
     return mk
 
 
-def prepare(ch, up='auto', flip='auto'):
-    m, up_, f, auto, sc = orientation(ch, up, flip)
+def prepare(ch, up='auto', flip='auto', yaw=0):
+    m, up_, f, auto, sc = orientation(ch, up, flip, yaw)
     say('autorig: %s up, %s (feet score %+.3f%s)' %
         (up_.upper(), 'turned 180' if f else 'facing front', sc, ', auto' if f == auto else ', forced'))
     if m.props_held:
         say('autorig: %d held prop(s) left out of the body measurements' % m.props_held)
-    return m, {'up': up_, 'flip': bool(f), 'flip_auto': bool(auto), 'scores': sc}
+    if clean_yaw(yaw):
+        say('autorig: turned a further %d deg' % clean_yaw(yaw))
+    return m, {'up': up_, 'flip': bool(f), 'flip_auto': bool(auto), 'yaw': clean_yaw(yaw), 'scores': sc}
 
 
-def autorig(ch, flip='auto', up='auto', markers=None):
+def autorig(ch, flip='auto', up='auto', markers=None, yaw=0):
     """Fill ch.bones / ch.parent / ch.bind and every prim's jn / w for an unrigged Char (everything is left
     in turned space, Y up). markers: turned-space {name: (X, Y)} (rig editor), else guessed.
     -> info dict (up, flip, flip_auto, markers, view, J, mesh)"""
-    m, info = prepare(ch, up, flip)
+    m, info = prepare(ch, up, flip, yaw)
     sil = Silhouette(m)
     auto = auto_markers(m, sil)
     mk = dict(auto)
@@ -1251,16 +1271,16 @@ def write_rig(ch, info, json_path, source, size=512):
     png = os.path.splitext(json_path)[0] + '.png'
     render(m.V, m.T, view, size, tri_colors(ch, m)).save(png)
     d = {'rigged': False, 'source': os.path.abspath(source), 'up': info['up'], 'flip': info['flip'],
-         'flip_auto': info['flip_auto'], 'image': os.path.abspath(png), 'size': size, 'view': view,
+         'flip_auto': info['flip_auto'], 'yaw': info.get('yaw', 0), 'image': os.path.abspath(png), 'size': size, 'view': view,
          'markers': {k: [round(c, 2) for c in to_px(view, size, *info['markers'][k])] for k in MARKERS}}
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(d, f, indent=2)       # ASCII only (\u escapes): the launcher reads it whatever the code page
     return d
 
 
-def rigprep(ch, source, json_path, up='auto', flip='auto', size=512):
+def rigprep(ch, source, json_path, up='auto', flip='auto', size=512, yaw=0):
     """rig json + front view for the launcher's rig editor (auto markers)"""
-    m, info = prepare(ch, up, flip)
+    m, info = prepare(ch, up, flip, yaw)
     info['markers'] = auto_markers(m)
     info['mesh'] = m
     info['view'] = view_of(m)

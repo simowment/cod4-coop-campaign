@@ -90,3 +90,40 @@ def ensure_all():
     ensure_oat()
     ensure_cache()
     os.makedirs(WORK, exist_ok=True)
+
+
+# third-party Python packages the skin and emote tools use; installed on first use, so a friend only needs
+# Python itself (the launcher offers to install that)
+PY_DEPS = (('numpy', 'numpy'), ('PIL', 'pillow'), ('zstandard', 'zstandard'))
+
+
+def ensure_deps():
+    import importlib
+    import importlib.util
+    need = [pkg for mod, pkg in PY_DEPS if importlib.util.find_spec(mod) is None]
+    if not need:
+        return
+    say('first use: installing the Python packages the skin tools need (%s), about a minute ...' % ', '.join(need))
+    in_venv = sys.prefix != getattr(sys, 'base_prefix', sys.prefix)
+    cmd = [sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--quiet'] + ([] if in_venv else ['--user']) + need
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if r.returncode != 0:   # no pip in this Python: bootstrap it, then try again
+        subprocess.run([sys.executable, '-m', 'ensurepip', '--upgrade'] + ([] if in_venv else ['--user']),
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if r.returncode != 0:
+        raise SystemExit('could not install %s automatically:\n%s\nInstall them by hand: python -m pip install %s'
+                         % (', '.join(need), (r.stdout or '').strip()[-600:], ' '.join(need)))
+    # a user site-packages folder that did not exist when Python started is not on sys.path yet
+    import site
+    usp = site.getusersitepackages()
+    if os.path.isdir(usp) and usp not in sys.path:
+        sys.path.append(usp)
+    importlib.invalidate_caches()
+    missing = [pkg for mod, pkg in PY_DEPS if importlib.util.find_spec(mod) is None]
+    if missing:
+        raise SystemExit('installed, but Python still cannot load: %s. Restart the launcher and try again.' % ', '.join(missing))
+    say('installed %s' % ', '.join(need))
+
+
+ensure_deps()

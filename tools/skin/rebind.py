@@ -646,18 +646,19 @@ def main():
             s.reconfigure(encoding='utf-8', errors='replace')
         except (AttributeError, ValueError):
             pass
-    flip, up, markers = (True if a.flip else 'auto'), a.up, None
+    flip, up, markers, yaw = (True if a.flip else 'auto'), a.up, None, 0
     if a.rig:
         from autorig import markers_from_json, load_rig
         d = load_rig(a.rig)
         # the markers belong to the facing the json was made with: --flip cannot change it
         flip, up, markers = d.get('flip', 'auto'), d.get('up', up), markers_from_json(d)
+        yaw = d.get('yaw', 0)
     convert(a.character, a.name, out=a.out, cod=a.cod, keep_weapons=a.keep_weapons, preview=a.preview,
-            layers=a.layers, flip=flip, up=up, markers=markers)
+            layers=a.layers, flip=flip, up=up, markers=markers, yaw=yaw)
 
 
 def convert(character, name, out=None, cod=DEFAULT_COD, keep_weapons=False, preview=None, layers=None, flip='auto',
-            up='auto', markers=None, rig_out=None):
+            up='auto', markers=None, rig_out=None, yaw=0):
     """flip / up / markers only matter for models without a skeleton (see autorig.py): flip 'auto' | True |
     False, up 'auto' | 'y' | 'z', markers {name: (X, Y)} in the turned space; rig_out = also write the rig
     json + front view png used (so the rig can be edited later)"""
@@ -669,7 +670,7 @@ def convert(character, name, out=None, cod=DEFAULT_COD, keep_weapons=False, prev
     ch = load_any(character)
     if not ch.rigged:
         from autorig import autorig, write_rig
-        info = autorig(ch, flip=flip, up=up, markers=markers)
+        info = autorig(ch, flip=flip, up=up, markers=markers, yaw=yaw)
         if rig_out:
             os.makedirs(os.path.dirname(os.path.abspath(rig_out)), exist_ok=True)
             write_rig(ch, info, rig_out, character)
